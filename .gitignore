@@ -1,0 +1,22 @@
+# Secrets & Environment
+.env
+.env.*
+
+# Python Cache & Virtual Environments
+__pycache__/
+*.py[cod]
+*.class
+venv/
+env/
+.venv/
+
+# Audio Files & Test Artifacts
+*.wav
+*.mp3
+sample.wav
+response_output.mp3
+
+# IDE & System Files
+.vscode/
+.idea/
+Thumbs.db
