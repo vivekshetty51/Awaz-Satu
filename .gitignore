@@ -5,6 +5,7 @@
 # Python Cache & Virtual Environments
 __pycache__/
 *.py[cod]
+*.pyc
 *.class
 venv/
 env/
@@ -16,7 +17,12 @@ env/
 sample.wav
 response_output.mp3
 
+# Node / Build Outputs
+node_modules/
+dist/
+
 # IDE & System Files
 .vscode/
 .idea/
 Thumbs.db
+.DS_Store
