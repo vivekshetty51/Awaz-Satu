@@ -1,5 +1,28 @@
+# Byte-compiled / Python artifacts
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Environments & Secrets
 .env
+backend/.env
 venv/
 .venv/
+
+# Audio outputs & temporary audio files
+response_output.mp3
+sample.wav
+*.mp3
+*.wav
+
+# Node / Frontend build dependencies
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# IDE / OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

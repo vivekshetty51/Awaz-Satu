@@ -87,6 +87,13 @@ class JSONFormatter(logging.Formatter):
                 except (TypeError, OverflowError):
                     log_payload[key] = str(value)
 
+        # Reconfigure sys.stdout to UTF-8 on Windows runtimes if possible
+        if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+            try:
+                sys.stdout.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+
         return json.dumps(log_payload, default=str, ensure_ascii=False)
 
 

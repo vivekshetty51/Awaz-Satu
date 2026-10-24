@@ -11,6 +11,18 @@ export default function DpiResults({ activeData }) {
             <span className="text-xs font-semibold text-slate-400 block uppercase">Service</span>
             <span className="font-semibold text-indigo-900">{activeData.service}</span>
           </div>
+          {activeData.query && (
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+              <span className="text-xs font-semibold text-slate-400 block uppercase">Your Question</span>
+              <p className="text-sm font-medium text-slate-800 mt-1">{activeData.query}</p>
+            </div>
+          )}
+          {activeData.response && (
+            <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100">
+              <span className="text-xs font-semibold text-emerald-600 block uppercase">Spoken Response</span>
+              <p className="text-sm font-medium text-emerald-950 mt-1">{activeData.response}</p>
+            </div>
+          )}
           <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
             <span className="text-xs font-semibold text-slate-400 block uppercase">Details</span>
             <p className="text-sm mt-1">{activeData.details}</p>
@@ -19,7 +31,7 @@ export default function DpiResults({ activeData }) {
       ) : (
         <div className="h-32 flex flex-col items-center justify-center text-slate-400 italic text-sm">
           <p>No active DPI requests.</p>
-          <p>Start a call to see live results.</p>
+          <p>Start a call and speak to see live results.</p>
         </div>
       )}
     </div>

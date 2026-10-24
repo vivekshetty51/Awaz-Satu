@@ -88,6 +88,13 @@ def ensure_ffmpeg_on_path() -> Optional[str]:
 ensure_ffmpeg_on_path()
 
 
+AGRICULTURAL_PROMPT: str = (
+    "Awaaz Setu: PM-Kisan Samman Nidhi, e-NAM Mandi prices, bhav, rate, "
+    "tamatar tomato, gehu wheat, pyaz onion, potato aalu, pashupalan livestock, "
+    "cow gay, buffalo bhains, milk doodh, weather mausam, barish rain."
+)
+
+
 class LocalWhisperASR(BaseASR):
     """
     Local Automated Speech Recognition using OpenAI Whisper.
@@ -218,9 +225,15 @@ class LocalWhisperASR(BaseASR):
         lang_code = language.strip().lower() if language else "hi"
         options = {
             "fp16": False,  # Safe CPU execution
-            "language": lang_code,
             "task": "transcribe",
+            "initial_prompt": AGRICULTURAL_PROMPT,
         }
+
+        # If 'auto' or 'multilingual', allow Whisper to auto-detect language
+        if lang_code in ("auto", "multilingual", "detect", "any", ""):
+            options["language"] = None
+        else:
+            options["language"] = lang_code
 
         result = self._model.transcribe(audio_data, **options)
         transcribed_text = result.get("text", "").strip()

@@ -10,7 +10,7 @@ Architectural Context:
 
 import base64
 import re
-from typing import Literal
+from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -145,6 +145,14 @@ class VoiceResponsePayload(BaseModel):
         min_length=1,
         description="Open-source engine or local provider identifier used for synthesis and inference.",
         examples=["whisper-onnx + llama-cpp + piper-tts", "bhashini-open-pipeline", "offline-mock"],
+    )
+    dpi_service: Optional[str] = Field(
+        default=None,
+        description="Resolved DPI service category if applicable, or None for conversational turns.",
+    )
+    dpi_details: Optional[str] = Field(
+        default=None,
+        description="Structured domain payload or status details associated with the DPI service.",
     )
 
     model_config = ConfigDict(

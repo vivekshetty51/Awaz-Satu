@@ -28,19 +28,40 @@ export function useLiveKitCall() {
     setDpiData(null);
   }, []);
 
-  const startCall = useCallback(async () => {
+  const startCall = useCallback(async (dialedNumber) => {
     setError('');
     setLogs([]);
     setDpiData(null);
+
+    const trimmed = (dialedNumber || '').trim();
+    if (!trimmed) {
+      setError('Invalid number');
+      setStatus('error');
+      return;
+    }
+
     setStatus('connecting');
     try {
+      log('Validating caller phone number...');
+      const valRes = await fetch(
+        `${TOKEN_URL}/validate-phone?phone=${encodeURIComponent(trimmed)}`
+      );
+      if (!valRes.ok) {
+        throw new Error('Invalid number');
+      }
+
       const roomName = `call-${Date.now()}`;
       const identity = `caller-${Math.random().toString(36).slice(2, 8)}`;
       log(`Requesting token for ${roomName}`);
       const res = await fetch(
-        `${TOKEN_URL}/token?room=${roomName}&identity=${identity}`
+        `${TOKEN_URL}/token?room=${roomName}&identity=${identity}&phone=${encodeURIComponent(trimmed)}`
       );
-      if (!res.ok) throw new Error(`Token server returned ${res.status}`);
+      if (!res.ok) {
+        if (res.status === 403) {
+          throw new Error('Invalid number');
+        }
+        throw new Error(`Token server returned ${res.status}`);
+      }
       const { token, url } = await res.json();
 
       const room = new Room();
@@ -68,18 +89,33 @@ export function useLiveKitCall() {
             log('Bad DPI payload ignored');
           }
         })
-        .on(RoomEvent.Disconnected, () => {
-          log('Disconnected');
+        .on(RoomEvent.Disconnected, (reason) => {
+          log(`Call ended: ${reason || 'session terminated'}`);
           setStatus('idle');
+          setDpiData(null);
         });
 
       await room.connect(url, token);
-      await room.localParticipant.setMicrophoneEnabled(true);
-      log('Microphone live');
+      try {
+        await room.localParticipant.setMicrophoneEnabled(true);
+        log('Microphone live');
+      } catch (micErr) {
+        throw new Error('Microphone permission denied. Please allow microphone access.');
+      }
       setStatus('connected');
     } catch (e) {
       console.error(e);
-      setError(e.message || 'Could not start call');
+      let errMsg = e.message || 'Could not start call';
+      if (errMsg === 'Invalid number') {
+        errMsg = 'Invalid number';
+      } else if (
+        e.name === 'NotAllowedError' ||
+        errMsg.toLowerCase().includes('permission') ||
+        errMsg.toLowerCase().includes('notallowed')
+      ) {
+        errMsg = 'Microphone permission denied. Please allow microphone access.';
+      }
+      setError(errMsg);
       setStatus('error');
       roomRef.current?.disconnect();
       roomRef.current = null;

@@ -65,9 +65,37 @@ class Settings(BaseSettings):
         description="Standard logging severity level (DEBUG, INFO, WARNING, ERROR, CRITICAL).",
     )
 
+    # 4. Multilingual Speech Recognition (ASR) Configurations
+    ASR_PROVIDER: str = Field(
+        default="local",
+        description="ASR provider: 'local' (LocalWhisperASR) or 'groq' (Groq Whisper LPU).",
+    )
+    GROQ_API_KEY: str = Field(
+        default="",
+        description="Groq API key for hosted Whisper transcription (free tier).",
+    )
+    GROQ_ASR_MODEL: str = Field(
+        default="whisper-large-v3-turbo",
+        description="Groq Whisper model ('whisper-large-v3-turbo' or 'whisper-large-v3').",
+    )
+
+    # 5. General-Purpose Conversational LLM Configurations
+    LLM_PROVIDER: str = Field(
+        default="gemini",
+        description="LLM provider: 'gemini' (Google Gemini API) or 'offline' (deterministic intent fallback).",
+    )
+    GEMINI_API_KEY: str = Field(
+        default="",
+        description="Google Gemini API key for free-tier natural language generation.",
+    )
+    GEMINI_MODEL: str = Field(
+        default="gemini-1.5-flash",
+        description="Gemini model identifier (e.g., 'gemini-1.5-flash' or 'gemini-2.0-flash').",
+    )
+
     # Pydantic Settings Configuration
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "backend/.env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
