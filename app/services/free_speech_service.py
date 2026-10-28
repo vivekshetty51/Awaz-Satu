@@ -3,7 +3,7 @@ Free and Open-Source Speech Processing Services for Awaaz Setu.
 
 Architectural Context:
 - STRICT ZERO-COST MANDATE: Uses exclusively open-source and free community tools:
-  * Speech-to-Text (ASR): `openai-whisper` (local inference, no API keys or paid tiers).
+  * Speech-to-Text (ASR): `faster-whisper` (CTranslate2; local CPU inference, no API keys, no PyTorch).
   * Text-to-Speech (TTS): `edge-tts` (Microsoft Edge Free Neural Voice API).
 - NON-BLOCKING EVENT LOOP: CPU-bound Whisper inference is offloaded via `asyncio.to_thread`.
 - ZERO-DISK / IN-MEMORY BUFFERING: Audio streams are processed in-memory via `io.BytesIO()`.
@@ -16,15 +16,15 @@ import logging
 import os
 import shutil
 import subprocess
-import tempfile
 import threading
 from typing import Dict, Optional
 import numpy as np
 
 try:
-    import whisper
+    from faster_whisper import WhisperModel, decode_audio
 except ImportError:
-    whisper = None  # Handled with graceful runtime error message if package missing
+    WhisperModel = None  # Handled with graceful runtime error message if package missing
+    decode_audio = None
 
 try:
     import edge_tts
@@ -88,32 +88,36 @@ def ensure_ffmpeg_on_path() -> Optional[str]:
 ensure_ffmpeg_on_path()
 
 
+# Vocabulary hint that biases recognition toward the terms callers actually use (English).
 AGRICULTURAL_PROMPT: str = (
-    "Awaaz Setu: PM-Kisan Samman Nidhi, e-NAM Mandi prices, bhav, rate, "
-    "tamatar tomato, gehu wheat, pyaz onion, potato aalu, pashupalan livestock, "
-    "cow gay, buffalo bhains, milk doodh, weather mausam, barish rain."
+    "Awaaz Setu. Karnataka government schemes: pension, Sandhya Suraksha, scholarship, "
+    "Gruha Lakshmi, Anna Bhagya, Gruha Jyothi, Shakti, Yuva Nidhi, Seva Sindhu, "
+    "PM-Kisan Samman Nidhi, e-NAM mandi prices, tomato, wheat, onion, potato, "
+    "livestock, cow, buffalo, milk, weather, rain."
 )
 
 
 class LocalWhisperASR(BaseASR):
     """
-    Local Automated Speech Recognition using OpenAI Whisper.
+    Local Automated Speech Recognition using faster-whisper (CTranslate2).
     Performs speech transcription in memory without blocking the FastAPI event loop.
     """
 
-    def __init__(self, model_name: str = "base", device: str = "cpu"):
+    def __init__(self, model_name: str = "base.en", device: str = "cpu", compute_type: str = "int8"):
         """
         Initializes the Whisper ASR engine.
 
         Args:
-            model_name: Whisper model size ('tiny', 'base', 'small', 'medium').
-                        'tiny' or 'base' are recommended for ultra-low latency CPU telephony.
+            model_name: faster-whisper model ('tiny.en', 'base.en', 'small.en' for English;
+                        'tiny', 'base', 'small' for multilingual).
             device: Compute device ('cpu', 'cuda').
+            compute_type: CTranslate2 quantisation ('int8' recommended on CPU).
         """
         # Ensure ffmpeg is discovered and registered in PATH
         ensure_ffmpeg_on_path()
         self.model_name = model_name
         self.device = device
+        self.compute_type = compute_type
         self._model = None
         self._lock = threading.Lock()
         logger.info(
@@ -127,12 +131,14 @@ class LocalWhisperASR(BaseASR):
         if self._model is None:
             with self._lock:
                 if self._model is None:
-                    if whisper is None:
+                    if WhisperModel is None:
                         raise RuntimeError(
-                            "openai-whisper is not installed. Please install it using 'pip install openai-whisper'."
+                            "faster-whisper is not installed. Please install it using 'pip install faster-whisper'."
                         )
-                    logger.info(f"Loading Whisper model '{self.model_name}' on {self.device}...")
-                    self._model = whisper.load_model(self.model_name, device=self.device)
+                    logger.info(f"Loading faster-whisper model '{self.model_name}' on {self.device}...")
+                    self._model = WhisperModel(
+                        self.model_name, device=self.device, compute_type=self.compute_type
+                    )
                     logger.info(f"Whisper model '{self.model_name}' loaded successfully.")
 
     def _audio_bytes_to_np_array(self, audio_bytes: bytes) -> np.ndarray:
@@ -201,19 +207,14 @@ class LocalWhisperASR(BaseASR):
         except Exception as ffmpeg_pipe_err:
             logger.debug(f"FFmpeg in-memory pipe failed ({ffmpeg_pipe_err}). Falling back to temp buffer.")
 
-        # Strategy 3: Safe fallback using temporary file if input format is arbitrary
-        with tempfile.NamedTemporaryFile(suffix=".audio", delete=False) as tmp_file:
-            tmp_path = tmp_file.name
-            tmp_file.write(audio_bytes)
-
-        try:
-            return whisper.load_audio(tmp_path)
-        finally:
-            if os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
+        # Strategy 3: decode arbitrary formats in memory with PyAV (no temp files: zero audio retention)
+        if decode_audio is None:
+            raise RuntimeError(
+                "faster-whisper is not installed. Please install it using 'pip install faster-whisper'."
+            )
+        return np.ascontiguousarray(
+            decode_audio(io.BytesIO(audio_bytes), sampling_rate=16000), dtype=np.float32
+        )
 
     def _transcribe_sync(self, audio_bytes: bytes, language: str) -> str:
         """
@@ -222,24 +223,27 @@ class LocalWhisperASR(BaseASR):
         self._ensure_model_loaded()
         audio_data = self._audio_bytes_to_np_array(audio_bytes)
 
-        lang_code = language.strip().lower() if language else "hi"
-        options = {
-            "fp16": False,  # Safe CPU execution
-            "task": "transcribe",
-            "initial_prompt": AGRICULTURAL_PROMPT,
-        }
+        lang_code = language.strip().lower() if language else "en"
+        # English-only checkpoints (*.en) cannot transcribe any other language.
+        if self.model_name.endswith(".en"):
+            lang_code = "en"
 
         # If 'auto' or 'multilingual', allow Whisper to auto-detect language
-        if lang_code in ("auto", "multilingual", "detect", "any", ""):
-            options["language"] = None
-        else:
-            options["language"] = lang_code
+        auto_detect = lang_code in ("auto", "multilingual", "detect", "any", "")
 
-        result = self._model.transcribe(audio_data, **options)
-        transcribed_text = result.get("text", "").strip()
-        return transcribed_text
+        segments, _info = self._model.transcribe(
+            audio_data,
+            language=None if auto_detect else lang_code,
+            task="transcribe",
+            initial_prompt=AGRICULTURAL_PROMPT,
+            beam_size=1,                       # lowest latency
+            condition_on_previous_text=False,
+            vad_filter=True,                   # silence/noise -> empty text -> retry prompt
+        )
+        # `segments` is a lazy generator: consume it here, inside the worker thread.
+        return " ".join(seg.text.strip() for seg in segments).strip()
 
-    async def transcribe(self, audio_bytes: bytes, language: str = "hi") -> str:
+    async def transcribe(self, audio_bytes: bytes, language: str = "en") -> str:
         """
         Transcribes speech asynchronously by delegating CPU-heavy computation
         to a separate worker thread via asyncio.to_thread.
@@ -280,7 +284,7 @@ class EdgeTTSService(BaseTTS):
         "ur": "ur-IN-GulNeural",         # Urdu (Female)
     }
 
-    DEFAULT_VOICE = "hi-IN-SwaraNeural"
+    DEFAULT_VOICE = "en-IN-NeerjaNeural"
 
     def __init__(self, voice_map: Optional[Dict[str, str]] = None):
         """
@@ -295,12 +299,12 @@ class EdgeTTSService(BaseTTS):
     def get_voice_for_language(self, language: str) -> str:
         """
         Resolves the appropriate neural voice for a given language code.
-        Defaults to 'hi-IN-SwaraNeural' if not matched.
+        Defaults to the Indian-English voice if not matched.
         """
-        normalized_lang = language.strip().lower() if language else "hi"
+        normalized_lang = language.strip().lower() if language else "en"
         return self.voices.get(normalized_lang, self.DEFAULT_VOICE)
 
-    async def synthesize(self, text: str, language: str = "hi") -> str:
+    async def synthesize(self, text: str, language: str = "en") -> str:
         """
         Synthesizes text into speech asynchronously in memory and returns a Base64 string.
 

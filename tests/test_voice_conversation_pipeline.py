@@ -150,7 +150,7 @@ class TestVoiceConversationPipeline(unittest.TestCase):
             service, details, spoken = classify_intent(q)
             self.assertEqual(service, "e-NAM Mandi Prices (demo)")
             self.assertIn("demo data", details)
-            self.assertIn("डेमो जानकारी", spoken)
+            self.assertIn("demo data", spoken.lower())
 
     def test_05_unrelated_query_does_not_return_mandi_prices(self):
         """Verifies unrelated queries NEVER route to Mandi prices or invent rates."""
@@ -182,7 +182,7 @@ class TestVoiceConversationPipeline(unittest.TestCase):
         data = res.json()
         self.assertEqual(data["status"], "success")
         self.assertEqual(data["recognized_text"], "")
-        self.assertIn("माफ़ कीजिए", data["ai_text_response"])
+        self.assertIn("Sorry", data["ai_text_response"])
         self.assertIsNone(data["dpi_service"])
         self.assertIsNone(data["dpi_details"])
         self.assertTrue(len(data["output_audio_base64"]) > 100)
@@ -279,7 +279,7 @@ class TestVoiceConversationPipeline(unittest.TestCase):
             self.assertEqual(res.status_code, 200)
             data = res.json()
             self.assertEqual(data["status"], "success")
-            self.assertIn("माफ़ कीजिए", data["ai_text_response"])
+            self.assertIn("Sorry", data["ai_text_response"])
             self.assertEqual(data["output_audio_base64"], "")
 
 

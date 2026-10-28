@@ -4,7 +4,7 @@ AI Agent Communication Bridge for Awaaz Setu.
 Architectural Context:
 - Non-blocking HTTP integration: Uses asynchronous `httpx.AsyncClient` with a strict timeout SLA.
 - Multi-tier conversational AI pipeline:
-  1. Google Gemini Conversational LLM (free tier: gemini-1.5-flash / gemini-2.0-flash) with
+  1. Google Gemini Conversational LLM (free tier: gemini-flash-latest alias) with
      per-caller session history isolation and agricultural voice prompt grounding.
   2. Legacy / Custom HTTP agent backend (if AI_SERVICE_URL or custom endpoint is specified).
   3. Offline deterministic domain intent fallback (classify_intent) when offline, timed out, or quota exhausted (429).
@@ -21,14 +21,14 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.core.logger import get_logger
-from app.services.intent_router import classify_intent
+from app.core.language import english_only
+from app.services.intent_router import PM_KISAN_SPOKEN, classify_intent
+from app.services.knowledge_router import answer_from_knowledge
 
 logger = get_logger("awaaz_setu.services.ai_agent")
 
 # Default mock response for graceful degradation when downstream agent is unreachable
-DEFAULT_MOCK_RESPONSE: str = (
-    "Aapka kisan samman nidhi ka agla kist 15 tarikh ko aayega."
-)
+DEFAULT_MOCK_RESPONSE: str = PM_KISAN_SPOKEN
 
 DEFAULT_TIMEOUT_SECONDS: float = 3.0
 
@@ -38,21 +38,37 @@ DEFAULT_AI_AGENT_URL: str = os.getenv(
     "http://localhost:8003/api/chat",
 )
 
-VOICE_SYSTEM_PROMPT: str = (
-    "You are Awaaz Setu, an empathetic, concise, and knowledgeable voice-based AI assistant for "
-    "Indian farmers, rural communities, and livestock keepers.\n"
-    "Mandatory Voice Guidelines:\n"
-    "1. Keep responses short and speakable: 1 to 3 short sentences maximum.\n"
-    "2. Never use markdown formatting, bullet points, asterisks (*), numbered lists, emojis, or URLs, "
-    "as they cannot be spoken naturally by text-to-speech engines.\n"
-    "3. Always respond in the SAME language or dialect the user asked in (Kannada, Hindi, English, "
-    "Hinglish, or Kanglish). If the user asks in Kannada, respond in conversational Kannada. "
-    "If the user asks in Hindi, respond in conversational Hindi.\n"
-    "4. Ground all answers in practical agricultural, crop health, weather advisory, and livestock care knowledge.\n"
-    "5. Strict anti-hallucination constraint: Never fabricate live APMC/mandi commodity prices or unverified "
-    "scheme disbursement dates. If asked for real-time mandi prices or dates, state that they should consult "
-    "their local APMC market or official portal."
-)
+def build_voice_system_prompt() -> str:
+    """Voice prompt for Gemini. The language rule follows the ENGLISH_ONLY policy."""
+    if english_only():
+        language_rule = (
+            "3. Always respond in clear, simple English only, even if the caller mixes in words "
+            "from another language.\n"
+        )
+    else:
+        language_rule = (
+            "3. Always respond in the SAME language or dialect the user asked in (Kannada, Hindi, "
+            "English, Hinglish, or Kanglish).\n"
+        )
+    return (
+        "You are Awaaz Setu, an empathetic, concise, and knowledgeable voice-based AI assistant for "
+        "citizens of Karnataka and rural India: farmers, livestock keepers, and anyone seeking "
+        "government scheme information such as pensions, scholarships and welfare.\n"
+        "Mandatory Voice Guidelines:\n"
+        "1. Keep responses short and speakable: 1 to 3 short sentences maximum.\n"
+        "2. Never use markdown formatting, bullet points, asterisks (*), numbered lists, emojis, or URLs, "
+        "as they cannot be spoken naturally by text-to-speech engines.\n"
+        + language_rule +
+        "4. Ground all answers in practical knowledge of government schemes, agriculture, crop health, "
+        "weather advisory, and livestock care.\n"
+        "5. Strict anti-hallucination constraint: Never fabricate live APMC/mandi commodity prices, "
+        "scheme amounts, eligibility rules or unverified disbursement dates. If asked for real-time "
+        "prices or exact scheme details you are unsure about, say the caller should confirm at the "
+        "nearest Gram Panchayat, Seva Sindhu centre or the official portal."
+    )
+
+
+VOICE_SYSTEM_PROMPT: str = build_voice_system_prompt()
 
 
 def mask_phone_number(phone: str) -> str:
@@ -145,7 +161,7 @@ async def query_gemini_llm(
     if not key:
         return None
 
-    model = (model_name or os.getenv("GEMINI_MODEL", "gemini-1.5-flash")).strip()
+    model = (model_name or os.getenv("GEMINI_MODEL", "gemini-flash-latest")).strip()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
     masked_phone = mask_phone_number(phone)
 
@@ -354,6 +370,7 @@ async def query_ai_agent(
     text_query: str,
     phone: str,
     backend_url: Optional[str] = None,
+    meta: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Dispatches a transcribed user query and phone number to conversational AI.
@@ -368,12 +385,20 @@ async def query_ai_agent(
     if backend_url:
         return await _query_legacy_http_backend(text_query, phone, backend_url)
 
-    # Priority 2: Google Gemini Conversational LLM
+    # Priority 2: Karnataka knowledge layer (decision tree -> RAG over official sources).
+    # Returns None when the question is out of scope, so we fall through to Gemini.
+    knowledge = await answer_from_knowledge(text_query, phone)
+    if knowledge is not None:
+        if meta is not None:
+            meta.update(route=knowledge.route, sources=knowledge.sources)
+        return knowledge.text
+
+    # Priority 3: Google Gemini Conversational LLM (general questions)
     gemini_key = (os.getenv("GEMINI_API_KEY", "")).strip()
     llm_provider = (os.getenv("LLM_PROVIDER", "gemini")).strip().lower()
 
     if gemini_key and llm_provider != "offline":
-        model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+        model_name = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
         gemini_response = await query_gemini_llm(
             text_query=text_query,
             phone=phone,
@@ -381,13 +406,15 @@ async def query_ai_agent(
             model_name=model_name,
         )
         if gemini_response:
+            if meta is not None:
+                meta.update(route="gemini", sources=[])
             return gemini_response
 
-    # Priority 3: Legacy AI_SERVICE_URL if explicitly configured in environment
+    # Priority 4: Legacy AI_SERVICE_URL if explicitly configured in environment
     env_service_url = os.getenv("AI_SERVICE_URL", "").strip()
     if env_service_url:
         return await _query_legacy_http_backend(text_query, phone, env_service_url)
 
-    # Priority 4: Offline domain intent fallback
+    # Priority 5: Offline domain intent fallback
     _, _, domain_fallback = classify_intent(text_query)
     return domain_fallback

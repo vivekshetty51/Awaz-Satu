@@ -161,3 +161,27 @@ sequenceDiagram
 
 ### Known Environmental Limitations
 - **LiveKit Cloud / Self-Hosted Server Required for Browser Calls**: `backend/agent.py` and the React frontend require either LiveKit Cloud project keys in `backend/.env` or a local running `livekit-server` instance. Unit and pipeline tests execute offline using mocks.
+
+### ADR 010: RAG over Official Karnataka Sources with Gemini Fallback
+- **Decision**: Add a knowledge layer (`app/rag`, `app/services/knowledge_router.py`) ahead of general Gemini in `query_ai_agent`. Resolution order: decision tree (optional plugin `app/services/decision_tree.py`) -> RAG over crawled `karnataka.gov.in` / `kar.nic.in` pages -> Gemini -> offline `classify_intent`.
+- **Scope detection**: a question is "in scope" only if (a) best retrieval similarity >= `RAG_THRESHOLD` and (b) the model, restricted to the retrieved context, does not answer `NOT_FOUND`.
+- **Rationale**: Government scheme facts (amounts, eligibility, dates) must come from official text, not model memory. Unrelated questions still get a helpful general answer.
+- **Design choices**: numpy vector store (no DB to deploy); Gemini embeddings (`gemini-embedding-001`, 768-dim); REST via `httpx` like the rest of the service; API key in `x-goog-api-key` header; crawler restricted to an allow-list and `robots.txt`; RAG failures never break a call (returns `None`, falls through).
+- **Model-name fix**: `gemini-1.5-flash` is retired and returns 404, which silently forced the offline fallback. Default is now the `gemini-flash-latest` alias, overridable via `GEMINI_MODEL`.
+- **UI contract**: `query_ai_agent(..., meta=dict)` fills `route` (`decision_tree` | `rag` | `gemini`) and `sources`; `/process-voice-turn` labels the DPI card accordingly.
+
+### ADR 011: English-Only Operation and faster-whisper for Local ASR
+- **Decision**: (1) Run the entire call in English (`ENGLISH_ONLY=true`, default). ASR is forced to English, TTS uses `en-IN-NeerjaNeural`, and the Gemini and RAG prompts require English replies. (2) Replace `openai-whisper` with `faster-whisper` (CTranslate2) for local ASR.
+- **Language policy**: `app/core/language.py::resolve_language()` is the single switch, applied in `/process-voice-turn`. Components (TTS voice map, Groq ASR, script detection) stay multilingual-capable, so regional languages are enabled later by setting `ENGLISH_ONLY=false` and adding localized replies; no pipeline rewrite.
+- **Why faster-whisper**: no PyTorch (small install, works where torch wheels are missing), int8 CPU inference is faster, and it accepts in-memory numpy audio. Default model `base.en` (English-only checkpoint, best English accuracy per size); change with `WHISPER_MODEL`.
+- **Silence handling**: `vad_filter=True` returns empty text for silence/noise, which triggers the spoken retry prompt instead of hallucinated words.
+- **Zero-audio-retention fix**: the old non-WAV fallback wrote a temp file. Audio is now decoded in memory (`decode_audio(io.BytesIO(...))`), matching section 3.1.
+- **Content fix**: the offline PM-Kisan reply previously stated an installment date ("15th") that nothing verified. It now gives the stable facts (Rs 6,000 per year in three installments) and points to the official portal / Common Service Centre.
+- **Tests**: Hindi string assertions in `test_voice_conversation_pipeline.py` were updated to English; `tests/test_english_asr_pipeline.py` covers the policy and the ASR wrapper.
+
+### ADR 012: Verified-Answer Knowledge Base ahead of Generative RAG
+- **Problem**: generative RAG failed the demo requirement. Official scheme portals (dssp, ssp) render in JavaScript and yield almost no crawlable text, and every answer depended on a live Gemini call (503 overload, 429 quota, multi-second latency).
+- **Decision**: add `app/rag/kb.py`, a retrieval-only layer over `data/kb/verified_answers.json`. Team-verified spoken answers are returned exactly as written with their official source; no LLM. Order: decision tree -> verified KB -> RAG -> Gemini.
+- **Matching**: pure-Python TF-IDF over words plus 3/4-letter pieces (robust to ASR misspellings), generic-word down-weighting, other-region rejection, minimum score 0.50 and 0.05 margin. Calibrated on sample in-scope/out-of-scope questions.
+- **Integrity**: entries are ignored unless the answer is filled and `source_url` is on an allowed Karnataka government domain. `python -m app.rag.kb_check` self-tests and leak-tests the file.
+- **Also**: Gemini generation for RAG now fails over between models on 503/429/404/timeouts.

@@ -193,7 +193,7 @@ class TestPhoneValidation(unittest.TestCase):
                 mock_send.assert_called_once_with(
                     audio_bytes=b"dummy_pcm",
                     user_phone=configured_number,
-                    language="hi",
+                    language="en",
                 )
 
     def test_10_agent_phone_masking(self):

@@ -1,0 +1,19 @@
+# Voice Engine (app/) + RAG. Use Python 3.12 (3.14 lacks wheels for some packages).
+fastapi
+uvicorn[standard]
+pydantic>=2
+pydantic-settings
+httpx>=0.28
+python-dotenv
+numpy>=1.26
+scipy>=1.11
+av>=14.0.0
+edge-tts
+imageio-ffmpeg
+# RAG ingestion
+beautifulsoup4
+pypdf
+# LiveKit agent + token server
+livekit-agents>=1.0
+# Local CPU speech recognition (faster-whisper: no PyTorch; models download on first use)
+faster-whisper

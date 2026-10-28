@@ -44,10 +44,22 @@ class Settings(BaseSettings):
 
     # 2. Audio & Language Processing Defaults
     PRIMARY_LANGUAGE: str = Field(
-        default="hi",
+        default="en",
         min_length=2,
         max_length=10,
-        description="Default target language code (e.g., 'hi' for Hindi, 'en' for English).",
+        description="Default target language code (e.g., 'en' for English).",
+    )
+    ENGLISH_ONLY: bool = Field(
+        default=True,
+        description="Force English for ASR, LLM replies and TTS. Set false when regional languages are added.",
+    )
+    WHISPER_MODEL: str = Field(
+        default="base.en",
+        description="faster-whisper model: tiny.en, base.en or small.en for English; tiny/base/small for multilingual.",
+    )
+    WHISPER_COMPUTE_TYPE: str = Field(
+        default="int8",
+        description="faster-whisper compute type on CPU ('int8' is fastest).",
     )
     MAX_AUDIO_SIZE_BYTES: int = Field(
         default=5 * 1024 * 1024,  # 5 Megabytes = 5,242,880 bytes
@@ -89,8 +101,8 @@ class Settings(BaseSettings):
         description="Google Gemini API key for free-tier natural language generation.",
     )
     GEMINI_MODEL: str = Field(
-        default="gemini-1.5-flash",
-        description="Gemini model identifier (e.g., 'gemini-1.5-flash' or 'gemini-2.0-flash').",
+        default="gemini-flash-latest",
+        description="Gemini model identifier. Use the 'gemini-flash-latest' alias or an exact ID from ai.google.dev/gemini-api/docs/models.",
     )
 
     # Pydantic Settings Configuration

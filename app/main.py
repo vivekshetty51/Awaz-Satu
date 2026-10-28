@@ -13,19 +13,20 @@ from contextlib import asynccontextmanager
 import base64
 import os
 import time
-from typing import Dict
+from typing import Any, Dict
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
+from app.core.language import resolve_language
 from app.core.logger import get_logger, setup_logging
 from app.schemas.voice import IncomingAudioPayload, VoiceResponsePayload
 from app.services.ai_agent import query_ai_agent, mask_phone_number
 from app.services.free_speech_service import EdgeTTSService, LocalWhisperASR
 from app.services.groq_speech_service import GroqWhisperASR
-from app.services.intent_router import classify_intent
+from app.services.intent_router import EMPTY_SPEECH_REPLY, classify_intent
 from app.services.speech_base import BaseASR
 
 # Initialize structured logging
@@ -63,6 +64,14 @@ def detect_script_language(text: str, default_language: str = "auto") -> str:
     return norm_default
 
 
+def _build_local_asr() -> LocalWhisperASR:
+    """faster-whisper engine configured from WHISPER_MODEL / WHISPER_COMPUTE_TYPE."""
+    return LocalWhisperASR(
+        model_name=os.getenv("WHISPER_MODEL", settings.WHISPER_MODEL),
+        compute_type=os.getenv("WHISPER_COMPUTE_TYPE", settings.WHISPER_COMPUTE_TYPE),
+    )
+
+
 # Global or state-managed speech service accessors
 def get_asr_service() -> BaseASR:
     """Returns the singleton ASR service from app state or initializes lazily."""
@@ -72,7 +81,7 @@ def get_asr_service() -> BaseASR:
 
         if asr_provider == "groq" and groq_key:
             logger.info("Initializing GroqWhisperASR (hosted LPU inference)...")
-            local_fallback = LocalWhisperASR(model_name="tiny")
+            local_fallback = _build_local_asr()
             model_name = os.getenv("GROQ_ASR_MODEL", settings.GROQ_ASR_MODEL)
             app.state.asr_service = GroqWhisperASR(
                 api_key=groq_key,
@@ -80,8 +89,8 @@ def get_asr_service() -> BaseASR:
                 fallback_asr=local_fallback,
             )
         else:
-            logger.info("Initializing LocalWhisperASR (local CPU inference)...")
-            app.state.asr_service = LocalWhisperASR(model_name="tiny")
+            logger.info("Initializing LocalWhisperASR (faster-whisper, local CPU inference)...")
+            app.state.asr_service = _build_local_asr()
     return app.state.asr_service
 
 
@@ -217,7 +226,7 @@ async def process_voice_turn(payload: IncomingAudioPayload) -> VoiceResponsePayl
         # Step 3: Automated Speech Recognition (ASR)
         recognized_text = await asr_service.transcribe(
             audio_bytes=audio_bytes,
-            language=payload.language,
+            language=resolve_language(payload.language),
         )
 
         # Handle empty speech / silence input gracefully: prompt retry without false intent dispatch
@@ -226,11 +235,11 @@ async def process_voice_turn(payload: IncomingAudioPayload) -> VoiceResponsePayl
                 "Speech recognition returned empty string (silence or ambient noise). Requesting caller repetition.",
                 extra={"user_phone": masked_phone},
             )
-            retry_response = "माफ़ कीजिए, आपकी आवाज़ साफ़ नहीं आई। कृपया अपना सवाल दोबारा पूछें।"
+            retry_response = EMPTY_SPEECH_REPLY
             try:
                 output_audio_base64 = await tts_service.synthesize(
                     text=retry_response,
-                    language=payload.language,
+                    language=resolve_language(payload.language),
                 )
             except Exception as tts_err:
                 logger.warning(
@@ -256,13 +265,25 @@ async def process_voice_turn(payload: IncomingAudioPayload) -> VoiceResponsePayl
         )
 
         # Step 4: Conversational AI Reasoning & Intent Classification
+        agent_meta: Dict[str, Any] = {}
         ai_text_response = await query_ai_agent(
             text_query=recognized_text,
             phone=payload.user_phone,
+            meta=agent_meta,
         )
 
         # Resolve DPI service category and details for UI payload
         dpi_service, dpi_details, _ = classify_intent(recognized_text)
+
+        # Answers grounded in official Karnataka sources are labelled as such
+        route = agent_meta.get("route")
+        if route == "rag":
+            sources = agent_meta.get("sources") or []
+            dpi_service = "Karnataka Govt Source (Official)"
+            dpi_details = ai_text_response + (f" Source: {sources[0]}" if sources else "")
+        elif route == "decision_tree":
+            dpi_service = "Karnataka Govt Scheme Guide"
+            dpi_details = ai_text_response
 
         logger.info(
             "AI Agent reasoning completed",
@@ -275,9 +296,11 @@ async def process_voice_turn(payload: IncomingAudioPayload) -> VoiceResponsePayl
 
         # Step 5: Text-to-Speech Synthesis (TTS)
         try:
-            tts_lang = detect_script_language(
-                text=ai_text_response,
-                default_language=payload.language,
+            tts_lang = resolve_language(
+                detect_script_language(
+                    text=ai_text_response,
+                    default_language=payload.language,
+                )
             )
             output_audio_base64 = await tts_service.synthesize(
                 text=ai_text_response,

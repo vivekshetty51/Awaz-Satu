@@ -54,6 +54,16 @@ WEATHER_PATTERN = re.compile(
 WEATHER_HINDI_KEYWORDS = ["बादल", "मौसम", "बारिश", "बरसात", "तापमान", "हवा"]
 
 
+# Spoken replies are English (ENGLISH_ONLY mode). Keyword lists above stay multilingual so
+# misheard or code-switched words still route correctly.
+EMPTY_SPEECH_REPLY: str = "Sorry, I could not hear you clearly. Please ask your question again."
+PM_KISAN_SPOKEN: str = (
+    "Under PM-Kisan Samman Nidhi, eligible farmers receive six thousand rupees a year in three "
+    "installments. To check your installment status, please visit the official PM-Kisan portal "
+    "or your nearest Common Service Centre."
+)
+
+
 def classify_intent(query: str) -> Tuple[Optional[str], Optional[str], str]:
     """
     Classifies a transcribed query into a DPI service, structured details, and spoken response.
@@ -66,14 +76,14 @@ def classify_intent(query: str) -> Tuple[Optional[str], Optional[str], str]:
         return (
             None,
             None,
-            "माफ़ कीजिए, आपकी आवाज़ साफ़ नहीं आई। कृपया अपना सवाल दोबारा पूछें।",
+            EMPTY_SPEECH_REPLY,
         )
 
     # 1. PM-Kisan Samman Nidhi (checked first to handle 'BM ki sana' before general conjunction checks)
     if any(k in q for k in PM_KISAN_KEYWORDS):
         service = "PM-Kisan Samman Nidhi"
-        details = "PM-Kisan: Next installment is scheduled for release. Beneficiary verification active."
-        spoken = "Aapka kisan samman nidhi ka agla kist 15 tarikh ko aayega."
+        details = "PM-Kisan Samman Nidhi: eligible farmers receive Rs 6,000 per year in three installments."
+        spoken = PM_KISAN_SPOKEN
         return service, details, spoken
 
     # 2. Mandi Prices (e-NAM)
@@ -81,34 +91,34 @@ def classify_intent(query: str) -> Tuple[Optional[str], Optional[str], str]:
         service = "e-NAM Mandi Prices (demo)"
         if any(w in q for w in ["tamatar", "tomato", "tomatoes", "टमाटर"]):
             details = "Tomato prices in Yeshwanthpur Mandi: Rs 2,400 per Quintal. Trend: Steady (demo data)."
-            spoken = "येशवंतपुर मंडी में टमाटर का भाव 2,400 रुपये प्रति क्विंटल है। (डेमो जानकारी)"
+            spoken = "Tomato at Yeshwanthpur mandi is 2,400 rupees per quintal. This is demo data."
         elif any(w in q for w in ["gehu", "wheat", "गेहूं", "गेहु"]):
             details = "Wheat (Gehu) prices in Bhopal Mandi: Rs 2,275 per Quintal. Trend: Steady (demo data)."
-            spoken = "भोपाल मंडी में गेहूं का भाव 2,275 रुपये प्रति क्विंटल है। (डेमो जानकारी)"
+            spoken = "Wheat at Bhopal mandi is 2,275 rupees per quintal. This is demo data."
         elif any(w in q for w in ["pyaz", "onion", "onions", "प्याज"]):
             details = "Onion (Pyaz) prices in Lasalgaon Mandi: Rs 1,850 per Quintal. Trend: Decreasing (demo data)."
-            spoken = "लासलगांव मंडी में प्याज का भाव 1,850 रुपये प्रति क्विंटल है। (डेमो जानकारी)"
+            spoken = "Onion at Lasalgaon mandi is 1,850 rupees per quintal. This is demo data."
         else:
             details = "e-NAM Mandi: Gehu Rs 2,275/Q, Tamatar Rs 2,400/Q, Pyaz Rs 1,850/Q (demo data)."
-            spoken = "ई-नाम मंडी में गेहूं 2,275 रुपये, टमाटर 2,400 रुपये और प्याज 1,850 रुपये प्रति क्विंटल है। (डेमो जानकारी)"
+            spoken = "At e-NAM mandi, wheat is 2,275 rupees, tomato 2,400 rupees and onion 1,850 rupees per quintal. This is demo data."
         return service, details, spoken
 
     # 3. Livestock & Animal Husbandry
     if any(k in q for k in LIVESTOCK_KEYWORDS):
         service = "Pashu Palan & Livestock Advisory"
         details = "Livestock Advisory: Maintain vaccination schedule and balanced mineral feed for cattle."
-        spoken = "पशुपालन सलाह: मवेशियों के अच्छे स्वास्थ्य के लिए समय पर टीकाकरण और संतुलित आहार सुनिश्चित करें।"
+        spoken = "Livestock advice: keep your cattle's vaccinations up to date and give them a balanced feed."
         return service, details, spoken
 
     # 4. Weather / IMD (boundary regex ensures 'whether' does not trigger weather)
     if WEATHER_PATTERN.search(q) or any(k in q for k in WEATHER_HINDI_KEYWORDS):
         service = "IMD Weather Advisory"
         details = "IMD Weather Advisory: Clear skies expected over the next 48 hours in your region."
-        spoken = "मौसम विभाग के अनुसार अगले दो दिनों तक आपके क्षेत्र में मौसम साफ रहने का अनुमान है।"
+        spoken = "Weather advisory demo: skies are expected to stay clear in your region for the next two days. This is demo data."
         return service, details, spoken
 
     # 5. General / Unrelated Query
     service = "Awaaz Setu General Advisory"
     details = "Awaaz Setu: Downstream conversational AI service is offline. Ask about Mandi prices, PM-Kisan, or Livestock."
-    spoken = "नमस्ते, आवाज़ सेतु में आपका स्वागत है। आप मंडी भाव, किसान सम्मान निधि, या पशुपालन संबंधी सवाल पूछ सकते हैं।"
+    spoken = "Hello, welcome to Awaaz Setu. You can ask me about government schemes, mandi prices, or livestock care."
     return service, details, spoken

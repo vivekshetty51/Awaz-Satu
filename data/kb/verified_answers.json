@@ -1,0 +1,110 @@
+{
+  "_instructions": [
+    "VERIFIED ANSWERS: instant, offline, no Gemini. Each entry is answered exactly as written below.",
+    "To activate an entry: open the OFFICIAL page in your browser, then replace the TODO answer with 1-3 short spoken sentences that say only what that page says, and set source_url to that page's real address (must be on karnataka.gov.in or kar.nic.in).",
+    "Entries whose answer still starts with TODO are ignored. Write numbers in words for speech (for example: twelve hundred rupees).",
+    "Add questions people really ask (any wording) and spelling variants in 'keywords' (for example: gruha laxmi, griha lakshmi).",
+    "Check your work with:  python -m app.rag.kb_check   and test a question with:  python -m app.rag.kb_check \"your question\"",
+    "Do NOT copy amounts from news sites or blogs: sources disagree and amounts change. Use only the official page."
+  ],
+  "entries": [
+    {
+      "id": "seva_sindhu_what",
+      "title": "Seva Sindhu portal",
+      "questions": ["What is Seva Sindhu?", "Tell me about Seva Sindhu", "What services can I get on Seva Sindhu?", "Where can I apply for Karnataka government services online?"],
+      "keywords": ["sevasindhu", "seva sindhu", "seva sindu", "government services online", "citizen services"],
+      "answer": "Seva Sindhu is the Karnataka Government's online portal for citizen services. You can apply for services from many government departments on the Seva Sindhu website, or ask at your nearest service centre.",
+      "source_url": "https://sevasindhu.karnataka.gov.in/Sevasindhu/English",
+      "_verify": "Written from the Seva Sindhu page structure seen in the crawl (department services, service centres, track application). Confirm the wording against the page before the demo."
+    },
+    {
+      "id": "seva_sindhu_track",
+      "title": "Track application on Seva Sindhu",
+      "questions": ["How do I track my application on Seva Sindhu?", "How can I check my application status?", "Where can I see the status of my application?"],
+      "keywords": ["track application", "application status", "seva sindhu status", "check status"],
+      "answer": "On the Seva Sindhu website, choose the Track Your Application option. You can also ask at your nearest Seva Sindhu service centre.",
+      "source_url": "https://sevasindhu.karnataka.gov.in/Sevasindhu/English",
+      "_verify": "Based on the Track Your Application page seen in the crawl. Confirm against the page."
+    },
+    {
+      "id": "sandhya_suraksha",
+      "title": "Sandhya Suraksha pension",
+      "questions": ["What is the Sandhya Suraksha pension?", "Who is eligible for Sandhya Suraksha?", "How much is the Sandhya Suraksha pension?", "How do I apply for old age pension?", "How can senior citizens get a pension?"],
+      "keywords": ["sandhya suraksha", "sandya suraksha", "sandhya suraksha yojane", "old age pension", "senior citizen pension", "vriddha pension"],
+      "answer": "TODO: copy eligibility, amount and how to apply from the official pension page.",
+      "source_url": "https://dssp.karnataka.gov.in/dssp/home_page.aspx"
+    },
+    {
+      "id": "pension_status",
+      "title": "Check pension status",
+      "questions": ["How do I check my pension status?", "Where can I see if my pension is credited?", "My pension has not come"],
+      "keywords": ["pension status", "pension credited", "pension not received", "know your pension status"],
+      "answer": "TODO: copy the steps from the official pension portal.",
+      "source_url": "https://dssp.karnataka.gov.in/dssp/home_page.aspx"
+    },
+    {
+      "id": "gruha_lakshmi",
+      "title": "Gruha Lakshmi scheme",
+      "questions": ["What is the Gruha Lakshmi scheme?", "How do I apply for Gruha Lakshmi?", "How much money do women get under Gruha Lakshmi?", "Who is eligible for Gruha Lakshmi?"],
+      "keywords": ["gruha lakshmi", "griha lakshmi", "gruha laxmi", "women head of family", "monthly assistance for women"],
+      "answer": "TODO: copy eligibility, amount and how to apply from the official page.",
+      "source_url": "https://sevasindhu.karnataka.gov.in/Sevasindhu/English"
+    },
+    {
+      "id": "gruha_jyothi",
+      "title": "Gruha Jyothi free electricity",
+      "questions": ["What is Gruha Jyothi?", "How do I get free electricity in Karnataka?", "How many units of free electricity do I get?"],
+      "keywords": ["gruha jyothi", "griha jyoti", "free electricity", "free power", "zero bill", "escom"],
+      "answer": "TODO: copy eligibility, free units and how to register from the official page.",
+      "source_url": "https://sevasindhu.karnataka.gov.in/Sevasindhu/English"
+    },
+    {
+      "id": "anna_bhagya",
+      "title": "Anna Bhagya scheme",
+      "questions": ["What is the Anna Bhagya scheme?", "How do I get free rice?", "Who gets food grains under Anna Bhagya?"],
+      "keywords": ["anna bhagya", "anna bagya", "free rice", "food grains", "food security"],
+      "answer": "TODO: copy the scheme details from the official food and civil supplies page.",
+      "source_url": "https://ahara.karnataka.gov.in/Home/Home"
+    },
+    {
+      "id": "ration_card",
+      "title": "Ration card",
+      "questions": ["How do I apply for a ration card?", "How do I get a BPL card?", "How can I add a name to my ration card?"],
+      "keywords": ["ration card", "bpl card", "apl card", "antyodaya", "new ration card"],
+      "answer": "TODO: copy how to apply from the official food and civil supplies page.",
+      "source_url": "https://ahara.karnataka.gov.in/Home/Home"
+    },
+    {
+      "id": "scholarship",
+      "title": "State Scholarship Portal",
+      "questions": ["How can I apply for a scholarship?", "What is the State Scholarship Portal?", "How do I check my scholarship status?", "Which scholarships are available for students?"],
+      "keywords": ["scholarship", "ssp", "state scholarship portal", "post matric", "pre matric", "student scholarship"],
+      "answer": "TODO: copy how to apply and check status from the official scholarship portal.",
+      "source_url": "https://ssp.karnataka.gov.in/"
+    },
+    {
+      "id": "shakti",
+      "title": "Shakti free bus travel",
+      "questions": ["What is the Shakti scheme?", "Is bus travel free for women in Karnataka?", "How do I get free bus travel?"],
+      "keywords": ["shakti", "free bus", "free bus travel women", "ksrtc women"],
+      "answer": "TODO: copy the scheme details from the official page.",
+      "source_url": "https://sevasindhu.karnataka.gov.in/Sevasindhu/English"
+    },
+    {
+      "id": "yuva_nidhi",
+      "title": "Yuva Nidhi unemployment allowance",
+      "questions": ["What is Yuva Nidhi?", "Is there an unemployment allowance in Karnataka?", "How do I apply for Yuva Nidhi?"],
+      "keywords": ["yuva nidhi", "unemployment allowance", "graduate unemployment", "diploma unemployment"],
+      "answer": "TODO: copy eligibility and how to apply from the official page.",
+      "source_url": "https://sevasindhu.karnataka.gov.in/Sevasindhu/English"
+    },
+    {
+      "id": "farmer_helpline",
+      "title": "Farmer services and helpline",
+      "questions": ["How can farmers contact the agriculture department?", "Is there a helpline for farmers?", "Where can I get farming advice?"],
+      "keywords": ["raita mitra", "farmer helpline", "agriculture helpline", "krishi", "farmer contact"],
+      "answer": "TODO: copy the helpline and contact details from the official Raita Mitra page.",
+      "source_url": "https://raitamitra.karnataka.gov.in/en"
+    }
+  ]
+}

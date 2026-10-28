@@ -171,7 +171,7 @@ def audio_to_wav(audio_bytes: bytes) -> bytes:
 async def send_audio_to_voice_engine(
     audio_bytes: bytes,
     user_phone: str,
-    language: str = "hi",
+    language: str = "en",
 ) -> dict:
     """
     Send an in-memory WAV audio clip to the voice engine via HTTP POST.
@@ -296,7 +296,7 @@ async def process_caller_audio(
         result = await send_audio_to_voice_engine(
             audio_bytes=audio_bytes,
             user_phone=user_phone,
-            language=os.getenv("VOICE_LANGUAGE", "hi"),
+            language=os.getenv("VOICE_LANGUAGE", "en"),
         )
 
         recognized_text = result.get("recognized_text", "")
