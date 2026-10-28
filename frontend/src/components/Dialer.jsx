@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Phone, PhoneOff, Loader2 } from 'lucide-react';
 
-const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
+const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '0', '⌫'];
 
 const STATUS_TEXT = {
   idle: 'Ready',
   connecting: 'Connecting...',
   connected: 'Call connected - speak now',
-  error: 'Connection failed',
+  error: 'Invalid number',
 };
 
 export default function Dialer({ status, error, onStartCall, onEndCall }) {
@@ -16,7 +16,13 @@ export default function Dialer({ status, error, onStartCall, onEndCall }) {
   const connecting = status === 'connecting';
 
   const handleKeyPress = (key) => {
-    if (phoneNumber.length < 10) setPhoneNumber((prev) => prev + key);
+    if (key === '⌫') {
+      setPhoneNumber((prev) => prev.slice(0, -1));
+    } else if (key === '+') {
+      setPhoneNumber((prev) => (prev.startsWith('+') ? prev : '+' + prev));
+    } else {
+      if (phoneNumber.length < 20) setPhoneNumber((prev) => prev + key);
+    }
   };
 
   return (
@@ -25,11 +31,24 @@ export default function Dialer({ status, error, onStartCall, onEndCall }) {
         Awaaz Setu Access Layer
       </h2>
       <p className={`text-center text-xs mb-4 ${status === 'error' ? 'text-rose-400' : 'text-emerald-400'}`}>
-        {STATUS_TEXT[status]}
+        {status === 'error' && error ? error : STATUS_TEXT[status]}
       </p>
 
-      <div className="bg-slate-800 p-4 rounded-xl text-right text-2xl font-mono tracking-widest min-h-[56px] mb-6 border border-slate-700">
-        {phoneNumber || <span className="text-slate-500">Enter Number</span>}
+      <div className="mb-6">
+        <input
+          type="tel"
+          value={phoneNumber}
+          onChange={(e) => {
+            const val = e.target.value;
+            if (/^[+0-9\s\-()]*$/.test(val)) {
+              setPhoneNumber(val);
+            }
+          }}
+          disabled={inCall || connecting}
+          placeholder="+91..."
+          aria-label="Caller Phone Number"
+          className="w-full bg-slate-800 p-4 rounded-xl text-right text-2xl font-mono tracking-widest min-h-[56px] border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        />
       </div>
 
       <div className="grid grid-cols-3 gap-3 mb-6">
@@ -62,7 +81,7 @@ export default function Dialer({ status, error, onStartCall, onEndCall }) {
           </button>
         ) : (
           <button
-            onClick={onStartCall}
+            onClick={() => onStartCall(phoneNumber)}
             className="w-2/3 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-semibold flex items-center justify-center gap-2"
           >
             <Phone className="w-5 h-5" /> Call Agent
@@ -70,7 +89,7 @@ export default function Dialer({ status, error, onStartCall, onEndCall }) {
         )}
       </div>
 
-      {error && <p className="mt-3 text-xs text-rose-400 text-center">{error}</p>}
+      {error && <p className="mt-3 text-xs text-rose-400 text-center font-medium">{error}</p>}
     </div>
   );
 }

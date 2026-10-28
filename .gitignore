@@ -1,14 +1,31 @@
-# Python
-__pycache__/
-*.pyc
-venv/
-.venv/
-# Secrets
+# Secrets & Environment
 .env
-# Node
+.env.*
+
+# Python Cache & Virtual Environments
+__pycache__/
+*.py[cod]
+*.pyc
+*.class
+venv/
+env/
+.venv/
+
+# Audio Files & Test Artifacts
+*.wav
+*.mp3
+sample.wav
+response_output.mp3
+
+# Node / Build Outputs
 node_modules/
 dist/
-# OS / editor
-.DS_Store
+
+# IDE & System Files
 .vscode/
 .idea/
+Thumbs.db
+.DS_Store
+
+# Generated RAG index
+data/rag_index/

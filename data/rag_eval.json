@@ -1,0 +1,18 @@
+{
+  "_comment": "in_scope: questions your index SHOULD answer (edit them to match the pages/docs you ingested). out_of_scope: questions that must go to general Gemini.",
+  "in_scope": [
+    "What is the Sandhya Suraksha pension?",
+    "How do I apply for a pension in Karnataka?",
+    "How can I apply for a scholarship?",
+    "What services does Seva Sindhu provide?",
+    "How do I track my Seva Sindhu application?",
+    "What is the Anna Bhagya scheme?"
+  ],
+  "out_of_scope": [
+    "Who wrote the Indian constitution?",
+    "Who won the cricket world cup?",
+    "What is the capital of France?",
+    "How do I cook biryani?",
+    "What is photosynthesis?"
+  ]
+}

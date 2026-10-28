@@ -2,3 +2,7 @@ livekit-agents>=1.0
 python-dotenv
 fastapi
 uvicorn[standard]
+av>=14.0.0
+numpy>=1.26.0
+scipy>=1.11.0
+httpx>=0.28.0

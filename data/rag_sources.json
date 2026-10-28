@@ -1,0 +1,11 @@
+{
+  "_comment": "Seed pages for the crawler. ONLY allowed domains are fetched, and links are followed only on each seed's own site. Many Karnataka portals (dssp, ssp) render in JavaScript and give almost no text: for those, copy the official text into data/rag_docs/ (see _template.txt). The KMEA PDF below was found via a search result and is not verified; remove it if it does not load.",
+  "seed_urls": [
+    "https://dssp.karnataka.gov.in/dssp/home_page.aspx",
+    "https://sevasindhu.karnataka.gov.in/Sevasindhu/English",
+    "https://sevasindhu.karnataka.gov.in/Faq.html",
+    "https://sevasindhu.karnataka.gov.in/Sevasindhu/DepartmentServices",
+    "https://ahara.karnataka.gov.in/Home/Home",
+    "https://kmea.karnataka.gov.in/storage/pdf-files/Reports%20and%20other%20docs/Sr%20Citizen.pdf"
+  ]
+}
