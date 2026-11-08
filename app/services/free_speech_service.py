@@ -3,7 +3,7 @@ Free and Open-Source Speech Processing Services for Awaaz Setu.
 
 Architectural Context:
 - STRICT ZERO-COST MANDATE: Uses exclusively open-source and free community tools:
-  * Speech-to-Text (ASR): `openai-whisper` (local inference, no API keys or paid tiers).
+  * Speech-to-Text (ASR): `faster-whisper` / `openai-whisper` (local inference, no API keys or paid tiers).
   * Text-to-Speech (TTS): `edge-tts` (Microsoft Edge Free Neural Voice API).
 - NON-BLOCKING EVENT LOOP: CPU-bound Whisper inference is offloaded via `asyncio.to_thread`.
 - ZERO-DISK / IN-MEMORY BUFFERING: Audio streams are processed in-memory via `io.BytesIO()`.
@@ -24,7 +24,12 @@ import numpy as np
 try:
     import whisper
 except ImportError:
-    whisper = None  # Handled with graceful runtime error message if package missing
+    whisper = None
+
+try:
+    from faster_whisper import WhisperModel
+except ImportError:
+    WhisperModel = None
 
 try:
     import edge_tts
@@ -91,17 +96,19 @@ ensure_ffmpeg_on_path()
 AGRICULTURAL_PROMPT: str = (
     "Awaaz Setu: PM-Kisan Samman Nidhi, e-NAM Mandi prices, bhav, rate, "
     "tamatar tomato, gehu wheat, pyaz onion, potato aalu, pashupalan livestock, "
-    "cow gay, buffalo bhains, milk doodh, weather mausam, barish rain."
+    "cow gay, buffalo bhains, milk doodh, weather mausam, barish rain, "
+    "karnataka, gruha lakshmi, gruha jyothi, yuva nidhi, anna bhagya, shakti scheme, "
+    "bhoomi rtc pahani, seva sindhu."
 )
 
 
 class LocalWhisperASR(BaseASR):
     """
-    Local Automated Speech Recognition using OpenAI Whisper.
+    Local Automated Speech Recognition using Faster-Whisper / OpenAI Whisper.
     Performs speech transcription in memory without blocking the FastAPI event loop.
     """
 
-    def __init__(self, model_name: str = "base", device: str = "cpu"):
+    def __init__(self, model_name: str = "tiny", device: str = "cpu"):
         """
         Initializes the Whisper ASR engine.
 
@@ -110,11 +117,11 @@ class LocalWhisperASR(BaseASR):
                         'tiny' or 'base' are recommended for ultra-low latency CPU telephony.
             device: Compute device ('cpu', 'cuda').
         """
-        # Ensure ffmpeg is discovered and registered in PATH
         ensure_ffmpeg_on_path()
         self.model_name = model_name
         self.device = device
         self._model = None
+        self._is_faster_whisper = False
         self._lock = threading.Lock()
         logger.info(
             "LocalWhisperASR initialized",
@@ -127,13 +134,20 @@ class LocalWhisperASR(BaseASR):
         if self._model is None:
             with self._lock:
                 if self._model is None:
-                    if whisper is None:
+                    if WhisperModel is not None:
+                        logger.info(f"Loading faster-whisper model '{self.model_name}' on {self.device}...")
+                        self._model = WhisperModel(self.model_name, device=self.device, compute_type="int8")
+                        self._is_faster_whisper = True
+                        logger.info(f"Faster-Whisper model '{self.model_name}' loaded successfully.")
+                    elif whisper is not None:
+                        logger.info(f"Loading openai-whisper model '{self.model_name}' on {self.device}...")
+                        self._model = whisper.load_model(self.model_name, device=self.device)
+                        self._is_faster_whisper = False
+                        logger.info(f"OpenAI-Whisper model '{self.model_name}' loaded successfully.")
+                    else:
                         raise RuntimeError(
-                            "openai-whisper is not installed. Please install it using 'pip install openai-whisper'."
+                            "Neither openai-whisper nor faster-whisper is installed."
                         )
-                    logger.info(f"Loading Whisper model '{self.model_name}' on {self.device}...")
-                    self._model = whisper.load_model(self.model_name, device=self.device)
-                    logger.info(f"Whisper model '{self.model_name}' loaded successfully.")
 
     def _audio_bytes_to_np_array(self, audio_bytes: bytes) -> np.ndarray:
         """
@@ -164,19 +178,17 @@ class LocalWhisperASR(BaseASR):
             if audio.ndim > 1:
                 audio = np.mean(audio, axis=-1)
 
-            # Resample to 16,000 Hz if necessary
+            # Resample to 16000 Hz if different
             if sr != 16000:
-                from scipy import signal
-                num_samples = int(len(audio) * 16000 / sr)
-                audio = signal.resample(audio, num_samples).astype(np.float32)
+                from scipy.signal import resample_poly
+                gcd = np.gcd(sr, 16000)
+                audio = resample_poly(audio, 16000 // gcd, sr // gcd)
 
             return np.ascontiguousarray(audio)
         except Exception as wav_err:
-            logger.debug(
-                f"In-memory scipy WAV parser failed or non-WAV format ({wav_err}). Falling back to FFmpeg pipe."
-            )
+            logger.debug(f"Direct WAV header parsing failed ({wav_err}). Falling back to FFmpeg pipe.")
 
-        # Strategy 2: In-memory FFmpeg pipe (reads from stdin, outputs raw 16kHz PCM to stdout)
+        # Strategy 2: High-performance FFmpeg in-memory pipe conversion
         try:
             cmd = [
                 ffmpeg_bin,
@@ -192,11 +204,11 @@ class LocalWhisperASR(BaseASR):
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
             )
-            out_pcm, _ = process.communicate(input=audio_bytes)
-            if process.returncode == 0 and len(out_pcm) > 0:
-                audio = np.frombuffer(out_pcm, dtype=np.int16).astype(np.float32) / 32768.0
+            raw_pcm, _ = process.communicate(input=audio_bytes)
+            if process.returncode == 0 and raw_pcm:
+                audio = np.frombuffer(raw_pcm, dtype=np.int16).astype(np.float32) / 32768.0
                 return np.ascontiguousarray(audio)
         except Exception as ffmpeg_pipe_err:
             logger.debug(f"FFmpeg in-memory pipe failed ({ffmpeg_pipe_err}). Falling back to temp buffer.")
@@ -207,7 +219,17 @@ class LocalWhisperASR(BaseASR):
             tmp_file.write(audio_bytes)
 
         try:
-            return whisper.load_audio(tmp_path)
+            if whisper is not None:
+                return whisper.load_audio(tmp_path)
+            from scipy.io import wavfile
+            sr, data = wavfile.read(tmp_path)
+            if data.dtype == np.int16:
+                audio = data.astype(np.float32) / 32768.0
+            else:
+                audio = data.astype(np.float32)
+            if audio.ndim > 1:
+                audio = np.mean(audio, axis=-1)
+            return np.ascontiguousarray(audio)
         finally:
             if os.path.exists(tmp_path):
                 try:
@@ -223,6 +245,17 @@ class LocalWhisperASR(BaseASR):
         audio_data = self._audio_bytes_to_np_array(audio_bytes)
 
         lang_code = language.strip().lower() if language else "hi"
+
+        if self._is_faster_whisper:
+            target_lang = None if lang_code in ("auto", "multilingual", "detect", "any", "") else lang_code
+            segments, info = self._model.transcribe(
+                audio_data,
+                language=target_lang,
+                initial_prompt=AGRICULTURAL_PROMPT,
+            )
+            transcribed_text = " ".join(seg.text for seg in segments).strip()
+            return transcribed_text
+
         options = {
             "fp16": False,  # Safe CPU execution
             "task": "transcribe",

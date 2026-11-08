@@ -3,11 +3,14 @@ AI Agent Communication Bridge for Awaaz Setu.
 
 Architectural Context:
 - Non-blocking HTTP integration: Uses asynchronous `httpx.AsyncClient` with a strict timeout SLA.
-- Multi-tier conversational AI pipeline:
-  1. Google Gemini Conversational LLM (free tier: gemini-1.5-flash / gemini-2.0-flash) with
-     per-caller session history isolation and agricultural voice prompt grounding.
-  2. Legacy / Custom HTTP agent backend (if AI_SERVICE_URL or custom endpoint is specified).
-  3. Offline deterministic domain intent fallback (classify_intent) when offline, timed out, or quota exhausted (429).
+- Multi-tier conversational AI pipeline powered by a formal Decision Tree:
+  1. Decision Tree Routing:
+     - Karnataka Government schemes, citizen portals, land records, welfare -> Routed to Karnataka RAG Engine.
+     - General / Out of range / Open domain questions -> Routed to Google Gemini Conversational LLM.
+  2. Grounded Karnataka Government RAG (KarnatakaRAGEngine) with official citations (sevasindhu, bhoomi, bescom, etc.).
+  3. Google Gemini Conversational LLM (gemini-1.5-flash / gemini-2.0-flash) with per-caller session history isolation.
+  4. Legacy / Custom HTTP agent backend (if AI_SERVICE_URL or custom endpoint is specified).
+  5. Offline deterministic domain intent fallback (classify_intent) when offline, timed out, or quota exhausted (429).
 - Privacy & PII protection: Caller phone numbers are strictly masked before logging.
 - Caller session isolation: Caller A's multi-turn conversation memory cannot bleed into Caller B.
 - Zero-cost: Free-tier API integration with zero paid service dependency.
@@ -17,10 +20,13 @@ from collections import defaultdict
 import os
 import re
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from app.core.logger import get_logger
+from app.decision_tree.decision_tree_engine import DecisionTreeRouter
+from app.decision_tree.tree_nodes import DecisionTrace, RoutingTarget
+from app.rag.rag_engine import karnataka_rag_engine, RAGResponse
 from app.services.intent_router import classify_intent
 
 logger = get_logger("awaaz_setu.services.ai_agent")
@@ -40,19 +46,20 @@ DEFAULT_AI_AGENT_URL: str = os.getenv(
 
 VOICE_SYSTEM_PROMPT: str = (
     "You are Awaaz Setu, an empathetic, concise, and knowledgeable voice-based AI assistant for "
-    "Indian farmers, rural communities, and livestock keepers.\n"
+    "citizens, farmers, rural communities, and students in India.\n"
     "Mandatory Voice Guidelines:\n"
     "1. Keep responses short and speakable: 1 to 3 short sentences maximum.\n"
     "2. Never use markdown formatting, bullet points, asterisks (*), numbered lists, emojis, or URLs, "
     "as they cannot be spoken naturally by text-to-speech engines.\n"
-    "3. Always respond in the SAME language or dialect the user asked in (Kannada, Hindi, English, "
-    "Hinglish, or Kanglish). If the user asks in Kannada, respond in conversational Kannada. "
-    "If the user asks in Hindi, respond in conversational Hindi.\n"
-    "4. Ground all answers in practical agricultural, crop health, weather advisory, and livestock care knowledge.\n"
+    "3. Respond clearly in English.\n"
+    "4. Ground state welfare, land, and citizen scheme inquiries in official Karnataka Government portals.\n"
     "5. Strict anti-hallucination constraint: Never fabricate live APMC/mandi commodity prices or unverified "
     "scheme disbursement dates. If asked for real-time mandi prices or dates, state that they should consult "
     "their local APMC market or official portal."
 )
+
+# Global singleton decision tree router
+decision_tree_router = DecisionTreeRouter()
 
 
 def mask_phone_number(phone: str) -> str:
@@ -248,10 +255,7 @@ async def _query_legacy_http_backend(
     phone: str,
     backend_url: str,
 ) -> str:
-    """
-    Dispatches request to a remote conversational HTTP AI backend (e.g. mock server or external endpoint).
-    Falls back to classify_intent on failure.
-    """
+    """Dispatches request to custom HTTP agent endpoint with timeout fallback."""
     masked_phone = mask_phone_number(phone)
     request_payload: Dict[str, Any] = {
         "phone_number": phone,
@@ -263,7 +267,7 @@ async def _query_legacy_http_backend(
     try:
         async with httpx.AsyncClient(timeout=client_timeout) as client:
             logger.debug(
-                "Dispatching request to legacy AI Agent backend",
+                "Dispatching request to AI Agent backend",
                 extra={
                     "backend_url": backend_url,
                     "phone": masked_phone,
@@ -350,25 +354,69 @@ async def _query_legacy_http_backend(
     return domain_fallback
 
 
-async def query_ai_agent(
+async def query_ai_agent_with_routing(
     text_query: str,
     phone: str,
     backend_url: Optional[str] = None,
-) -> str:
+) -> Tuple[str, Optional[str], Optional[str], str, Optional[str], float]:
     """
-    Dispatches a transcribed user query and phone number to conversational AI.
-    1. If a custom backend_url is provided (e.g. in test or custom deployment),
-       dispatches to that downstream HTTP service.
-    2. If Gemini API is configured (GEMINI_API_KEY present and LLM_PROVIDER != 'offline'),
-       queries Google Gemini API with isolated per-caller conversation history.
-    3. Falls back smoothly to domain intent classification on quota errors (429), timeouts,
-       or offline connectivity, never failing the voice turn.
-    """
-    # Priority 1: Explicit custom backend_url provided (e.g. in test)
-    if backend_url:
-        return await _query_legacy_http_backend(text_query, phone, backend_url)
+    Core conversational orchestrator with formal Decision Tree routing:
+    1. If a custom backend_url is passed, routes to legacy HTTP test server.
+    2. Evaluates the query using the Decision Tree:
+       - RAG (Karnataka Gov domain): Queries Karnataka RAG engine, returns official grounded response + source URL.
+       - GEMINI (General / External): Dispatches to Google Gemini LLM API (with conversational fallback).
+    3. Guarantees 100% fault-tolerance and never crashes the voice call.
 
-    # Priority 2: Google Gemini Conversational LLM
+    Returns:
+        (spoken_text, dpi_service, dpi_details, decision_route, source_url, confidence)
+    """
+    # Priority 1: Explicit custom backend_url provided (e.g. in test or custom deployment)
+    if backend_url:
+        legacy_ans = await _query_legacy_http_backend(text_query, phone, backend_url)
+        dpi_service, dpi_details, _ = classify_intent(text_query)
+        return legacy_ans, dpi_service, dpi_details, "CUSTOM_BACKEND", None, 1.0
+
+    # Priority 2: Decision Tree Evaluation
+    decision_trace: DecisionTrace = decision_tree_router.evaluate(text_query)
+    target = decision_trace.target
+    confidence = decision_trace.confidence
+
+    # -------------------------------------------------------------------------
+    # Branch A: Karnataka Government Domain -> Route to Karnataka RAG
+    # -------------------------------------------------------------------------
+    if target == RoutingTarget.RAG:
+        logger.info(
+            "Decision Tree routed query to Karnataka RAG (category='%s', rules=%s)",
+            decision_trace.category,
+            decision_trace.matched_rules,
+        )
+        rag_res: Optional[RAGResponse] = await karnataka_rag_engine.answer(
+            query=text_query,
+            phone=phone,
+        )
+
+        if rag_res:
+            # Update caller session memory
+            caller_sessions.add_turn(phone, "user", text_query)
+            caller_sessions.add_turn(phone, "model", rag_res.spoken_text)
+
+            return (
+                rag_res.spoken_text,
+                rag_res.dpi_service,
+                rag_res.dpi_details,
+                "RAG",
+                rag_res.official_url,
+                confidence,
+            )
+
+        # Fallback if RAG retrieval score was low: route gracefully to Gemini
+        logger.info("Karnataka RAG returned no high-confidence document; escalating to Gemini.")
+
+    # -------------------------------------------------------------------------
+    # Branch B: General / Out-of-Range -> Route to Google Gemini
+    # -------------------------------------------------------------------------
+    logger.info("Decision Tree routed query to Google Gemini (confidence=%.2f)", confidence)
+
     gemini_key = (os.getenv("GEMINI_API_KEY", "")).strip()
     llm_provider = (os.getenv("LLM_PROVIDER", "gemini")).strip().lower()
 
@@ -381,13 +429,39 @@ async def query_ai_agent(
             model_name=model_name,
         )
         if gemini_response:
-            return gemini_response
+            return (
+                gemini_response,
+                "Google Gemini Assistant",
+                "Answered via Google Gemini Conversational Intelligence (General Domain)",
+                "GEMINI",
+                None,
+                confidence,
+            )
 
-    # Priority 3: Legacy AI_SERVICE_URL if explicitly configured in environment
+    # Legacy AI_SERVICE_URL if explicitly configured in environment
     env_service_url = os.getenv("AI_SERVICE_URL", "").strip()
     if env_service_url:
-        return await _query_legacy_http_backend(text_query, phone, env_service_url)
+        legacy_ans = await _query_legacy_http_backend(text_query, phone, env_service_url)
+        dpi_service, dpi_details, _ = classify_intent(text_query)
+        return legacy_ans, dpi_service, dpi_details, "GEMINI", None, confidence
 
-    # Priority 4: Offline domain intent fallback
-    _, _, domain_fallback = classify_intent(text_query)
-    return domain_fallback
+    # Final Offline conversational / domain fallback
+    dpi_service, dpi_details, domain_fallback = classify_intent(text_query)
+    return domain_fallback, dpi_service, dpi_details, "GEMINI", None, confidence
+
+
+async def query_ai_agent(
+    text_query: str,
+    phone: str,
+    backend_url: Optional[str] = None,
+) -> str:
+    """
+    Backward-compatible wrapper for query_ai_agent returning the spoken response string.
+    Internally executes the Decision Tree (RAG vs Gemini).
+    """
+    spoken_text, _, _, _, _, _ = await query_ai_agent_with_routing(
+        text_query=text_query,
+        phone=phone,
+        backend_url=backend_url,
+    )
+    return spoken_text
