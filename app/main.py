@@ -176,6 +176,12 @@ class RAGQueryRequest(BaseModel):
     phone: Optional[str] = Field(default="+919876543210", description="Caller phone number.")
 
 
+class TextTurnRequest(BaseModel):
+    query: str = Field(..., description="User question or query text.")
+    user_phone: Optional[str] = Field(default="+919876543210", description="Caller phone number.")
+    language: Optional[str] = Field(default="en", description="Preferred response language.")
+
+
 @app.post("/api/decision-tree/evaluate", tags=["Decision Tree & RAG"])
 async def evaluate_decision_tree(payload: DecisionTreeRequest) -> Dict[str, Any]:
     """
@@ -226,6 +232,57 @@ async def query_karnataka_rag(payload: RAGQueryRequest) -> Dict[str, Any]:
         "retrieval_score": rag_res.retrieval_score,
         "grounded_via": rag_res.grounded_via,
     }
+
+
+@app.post("/api/text-turn", response_model=VoiceResponsePayload, tags=["Voice Processing"])
+async def process_text_turn(payload: TextTurnRequest) -> VoiceResponsePayload:
+    """
+    Direct text turn orchestrator:
+    1. Evaluates query via Hierarchical Decision Tree (RAG vs Gemini).
+    2. Retrieves official Karnataka Gov knowledge or Gemini response.
+    3. Synthesizes Edge-TTS neural speech audio.
+    4. Returns complete VoiceResponsePayload with DPI payload and verified portal citation.
+    """
+    start_time = time.perf_counter()
+    masked_phone = mask_phone_number(payload.user_phone)
+
+    ai_text_response, dpi_service, dpi_details, decision_route, source_url, confidence = (
+        await query_ai_agent_with_routing(
+            text_query=payload.query,
+            phone=payload.user_phone or "+919876543210",
+        )
+    )
+
+    output_audio_base64 = ""
+    try:
+        tts_lang = detect_script_language(
+            text=ai_text_response,
+            default_language=payload.language or "en",
+        )
+        tts_service = get_tts_service()
+        output_audio_base64 = await tts_service.synthesize(
+            text=ai_text_response,
+            language=tts_lang,
+        )
+    except Exception as tts_err:
+        logger.warning(
+            "TTS synthesis failed in text turn; preserving text response",
+            extra={"error": str(tts_err), "user_phone": masked_phone},
+        )
+
+    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    return VoiceResponsePayload(
+        status="success",
+        recognized_text=payload.query,
+        ai_text_response=ai_text_response,
+        output_audio_base64=output_audio_base64,
+        processing_time_ms=elapsed_ms,
+        provider_used="Direct-DecisionTree-Router",
+        dpi_service=dpi_service,
+        decision_route=decision_route,
+        source_url=source_url,
+        confidence=confidence,
+    )
 
 
 @app.get("/api/rag/documents", tags=["Decision Tree & RAG"])

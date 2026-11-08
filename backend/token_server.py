@@ -215,4 +215,18 @@ def get_token(
         token_builder = token_builder.with_metadata(metadata_payload)
 
     token = token_builder.to_jwt()
-    return {"token": token, "url": livekit_url, "room": room}
+    is_livekit_ready = bool(
+        api_key
+        and not api_key.startswith("your_")
+        and livekit_url
+        and not "your-project" in livekit_url
+        and api_secret
+        and not api_secret.startswith("your_")
+    )
+    return {
+        "token": token,
+        "url": livekit_url,
+        "room": room,
+        "livekit_ready": is_livekit_ready,
+        "mode": "livekit_webrtc" if is_livekit_ready else "direct_voice",
+    }
