@@ -96,7 +96,7 @@ Terminal 2:
 ```powershell
 cd c:\Users\USER\Awaz-Satu
 $env:PYTHONPATH="c:\Users\USER\Awaz-Satu"
-uvicorn backend.token_server:app --port 8001 --reload
+python -m uvicorn backend.token_server:app --port 8001 --reload
 ```
 > Token Server is live at: `http://localhost:8001`  
 > Health probe: `http://localhost:8001/health`  

@@ -66,12 +66,15 @@ def is_caller_number_allowed(phone: str) -> bool:
     Authoritative server-side caller number validation.
     Checks normalized entered number against ALLOWED_CALLER_NUMBER environment variable.
     Requires strict exact equality; rejects partial or substring matches.
+    If ALLOWED_CALLER_NUMBER is '*', permits any valid non-empty telephone number.
     If ALLOWED_CALLER_NUMBER is empty or not set, rejects all incoming numbers.
     """
     allowed = os.getenv("ALLOWED_CALLER_NUMBER", "").strip()
     if not allowed:
         return False
     norm_phone = normalize_phone(phone)
+    if allowed == "*":
+        return bool(norm_phone)
     norm_allowed = normalize_phone(allowed)
     if not norm_phone or not norm_allowed:
         return False
