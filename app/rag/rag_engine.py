@@ -135,7 +135,7 @@ class KarnatakaRAGEngine:
         doc: KarnatakaSchemeDocument,
         query: str,
         api_key: str,
-        model_name: str = "gemini-1.5-flash",
+        model_name: str = "gemini-3.5-flash-lite",
     ) -> Optional[str]:
         """
         Synthesizes a tailored, speakable English response using Google Gemini,
@@ -157,26 +157,34 @@ class KarnatakaRAGEngine:
             "ANSWER:"
         )
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+        candidate_models = [model_name]
+        for alt in ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"]:
+            if alt not in candidate_models:
+                candidate_models.append(alt)
+
         payload = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.2, "maxOutputTokens": 150},
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=3.5) as client:
-                res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
-                if res.status_code == 200:
-                    data = res.json()
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                        clean = re.sub(r"[*_#`~>•]", " ", text)
-                        clean = re.sub(r"\s+", " ", clean).strip()
-                        if clean:
-                            return clean
-        except Exception as exc:
-            logger.warning("Gemini RAG synthesis error: %s (falling back to template)", exc)
+        for model in candidate_models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            try:
+                async with httpx.AsyncClient(timeout=4.0) as client:
+                    res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
+                    if res.status_code == 200:
+                        data = res.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                            clean = re.sub(r"[*_#`~>•]", " ", text)
+                            clean = re.sub(r"\s+", " ", clean).strip()
+                            if clean:
+                                return clean
+                    elif res.status_code in (404, 503, 429):
+                        continue
+            except Exception as exc:
+                continue
 
         return None
 

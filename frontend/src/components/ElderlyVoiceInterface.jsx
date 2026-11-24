@@ -4,6 +4,7 @@ import {
   RotateCcw,
   Sparkles,
   Phone,
+  PhoneOff,
   Mic,
   ExternalLink,
   ShieldCheck,
@@ -15,7 +16,8 @@ import GoogleMicrophone from './GoogleMicrophone';
 
 export default function ElderlyVoiceInterface({
   voiceAssistant,
-  onOpenDialer,
+  callerPhone = '1234567891',
+  onEndCall,
 }) {
   const {
     isListening,
@@ -42,10 +44,10 @@ export default function ElderlyVoiceInterface({
     en: {
       appName: 'Awaaz Setu',
       tagline: 'Karnataka Citizen Voice Assistance',
-      elderTip: 'Designed for Senior Citizens: Just tap the mic and speak naturally.',
+      elderTip: 'Connected: Tap the Google mic to speak naturally, or pick any scheme below.',
       langSelect: 'Language / ಭಾಷೆ:',
       youSaid: 'You Asked:',
-      govAnswer: 'Government Answer:',
+      govAnswer: 'Assistant Answer:',
       replay: 'Listen Again (Replay)',
       popularSchemes: 'Popular Karnataka Schemes:',
       schemes: [
@@ -102,10 +104,10 @@ export default function ElderlyVoiceInterface({
     kn: {
       appName: 'ಆವಾಜ್ ಸೇತು',
       tagline: 'ಕರ್ನಾಟಕ ಸರ್ಕಾರದ ಧ್ವನಿ ಸೇವೆ',
-      elderTip: 'ಹಿರಿಯ ನಾಗರಿಕರಿಗೆ ಸುಲಭ ಧ್ವನಿ ಸೇವೆ: ದೊಡ್ಡ ಮೈಕ್ ಒತ್ತಿ ನೇರವಾಗಿ ಮಾತನಾಡಿ.',
+      elderTip: 'ಕರೆ ಸಂಪರ್ಕಗೊಂಡಿದೆ: ಗೂಗಲ್ ಮೈಕ್ ಒತ್ತಿ ನೇರವಾಗಿ ಮಾತನಾಡಿ, ಧ್ವನಿಯಲ್ಲಿ ಉತ್ತರ ಬರುತ್ತದೆ.',
       langSelect: 'ಭಾಷೆ / Language:',
       youSaid: 'ನೀವು ಕೇಳಿದ ಪ್ರಶ್ನೆ:',
-      govAnswer: 'ಸರ್ಕಾರದ ಅಧಿಕೃತ ಮಾಹಿತಿ:',
+      govAnswer: 'ಸಹಾಯಕ ಉತ್ತರ:',
       replay: 'ಮತ್ತೊಮ್ಮೆ ಧ್ವನಿ ಕೇಳಿ (Replay)',
       popularSchemes: 'ಪ್ರಮುಖ ಸರ್ಕಾರಿ ಯೋಜನೆಗಳು:',
       schemes: [
@@ -162,7 +164,7 @@ export default function ElderlyVoiceInterface({
     hi: {
       appName: 'आवाज़ सेतु',
       tagline: 'कर्नाटक नागरिक वॉयस सेवा',
-      elderTip: 'वरिष्ठ नागरिकों के लिए आसान सेवा: बड़ा माइक दबाएं और सीधे बोलें।',
+      elderTip: 'कॉल कनेक्टेड है: गूगल माइक दबाएं और सीधे बोलें।',
       langSelect: 'भाषा / Language:',
       youSaid: 'आपने पूछा:',
       govAnswer: 'सरकारी जवाब:',
@@ -207,8 +209,28 @@ export default function ElderlyVoiceInterface({
 
   return (
     <div className="flex flex-col h-full text-slate-100 justify-between select-none">
-      {/* Phone App Top Header */}
+      {/* Phone App Top Header & Live Call Status */}
       <div>
+        {/* Active Telephony Line Bar */}
+        <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 mb-2">
+          <div className="flex items-center gap-1.5 text-[11px] font-mono text-emerald-400">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span>Line Active: {callerPhone}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={onEndCall}
+            className="text-[10px] bg-rose-600/90 hover:bg-rose-600 text-white font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 shadow-sm transition-all"
+          >
+            <PhoneOff className="w-2.5 h-2.5" />
+            <span>End Call</span>
+          </button>
+        </div>
+
         <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
           <div>
             <h1 className="text-base font-extrabold text-white flex items-center gap-1.5 tracking-tight">
@@ -265,7 +287,7 @@ export default function ElderlyVoiceInterface({
           </p>
         </div>
 
-        {/* Tab Switcher: Voice Hub vs One-Touch Schemes */}
+        {/* Tab Switcher: Google Voice Hub vs One-Touch Schemes */}
         <div className="grid grid-cols-2 gap-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800 mb-2">
           <button
             type="button"
@@ -410,22 +432,22 @@ export default function ElderlyVoiceInterface({
         </div>
       )}
 
-      {/* Bottom Phone Action Bar */}
+      {/* Bottom Phone Action Bar: End Call Button */}
       <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
         <button
           type="button"
-          onClick={onOpenDialer}
-          className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow border border-slate-700"
+          onClick={onEndCall}
+          className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-lg shadow-rose-900/30"
         >
-          <Phone className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Virtual Dialer</span>
+          <PhoneOff className="w-4 h-4 fill-current" />
+          <span>End Call & Hang Up</span>
         </button>
 
         {isListening && (
           <button
             type="button"
             onClick={toggleListen}
-            className="px-3 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all shadow"
+            className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow"
           >
             Done Speaking
           </button>

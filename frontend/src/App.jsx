@@ -9,13 +9,35 @@ import { useLiveKitCall } from './hooks/useLiveKitCall';
 import { Shield, Sparkles, HeartHandshake, Mic } from 'lucide-react';
 
 export default function App() {
-  const [phoneScreen, setPhoneScreen] = useState('voice'); // 'voice' | 'dialer'
+  // First in the home page: Phone Dialer appears!
+  const [phoneScreen, setPhoneScreen] = useState('dialer'); // 'dialer' | 'voice'
+  const [activeCallerPhone, setActiveCallerPhone] = useState('1234567891');
 
   // Voice Assistant Hook for Google Microphone, live frequency fluctuations & elder interface
   const voiceAssistant = useVoiceAssistant();
 
-  // Telephony LiveKit Call Hook for optional traditional dialing
+  // Telephony LiveKit Call Hook for call session management
   const livekitCall = useLiveKitCall();
+
+  // Trigger call connection from dialer and transition to voice screen
+  const handleStartCall = async (phoneNumber) => {
+    const dialed = (phoneNumber || '1234567891').trim();
+    setActiveCallerPhone(dialed);
+    // Transition to Awaaz Setu in-call screen with Google Gemini microphone
+    setPhoneScreen('voice');
+    try {
+      await livekitCall.startCall(dialed);
+    } catch (err) {
+      console.warn('LiveKit SFU bypass:', err);
+    }
+  };
+
+  // Hang up and return to home phone dialer
+  const handleEndCall = async () => {
+    await livekitCall.endCall();
+    voiceAssistant.stopSpeaking();
+    setPhoneScreen('dialer');
+  };
 
   // Merge DPI and log telemetry from either voice mode
   const activeDpi = voiceAssistant.dpiData || livekitCall.dpiData;
@@ -57,25 +79,29 @@ export default function App() {
         {/* Left: Standard Realistic Smartphone Body */}
         <div className="shrink-0 flex flex-col items-center">
           <MobileFrame>
-            {phoneScreen === 'voice' ? (
-              <ElderlyVoiceInterface
-                voiceAssistant={voiceAssistant}
-                onOpenDialer={() => setPhoneScreen('dialer')}
-              />
-            ) : (
+            {phoneScreen === 'dialer' ? (
               <Dialer
                 status={livekitCall.status}
                 error={livekitCall.error}
-                onStartCall={livekitCall.startCall}
-                onEndCall={livekitCall.endCall}
-                onBackToVoice={() => setPhoneScreen('voice')}
+                onStartCall={handleStartCall}
+                onEndCall={handleEndCall}
+              />
+            ) : (
+              <ElderlyVoiceInterface
+                voiceAssistant={voiceAssistant}
+                callerPhone={activeCallerPhone}
+                onEndCall={handleEndCall}
               />
             )}
           </MobileFrame>
 
           <p className="text-xs text-slate-500 mt-2 font-mono flex items-center gap-1.5">
             <Mic className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-            <span>Interactive Voice Smartphone — Tap mic to talk</span>
+            <span>
+              {phoneScreen === 'dialer'
+                ? 'Dial 1234567891 & tap Call Agent to connect'
+                : 'Call Connected — Google Gemini mic active'}
+            </span>
           </p>
         </div>
 

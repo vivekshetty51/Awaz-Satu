@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Phone, PhoneOff, Loader2, ArrowLeft, Mic } from 'lucide-react';
+import { Phone, PhoneOff, Loader2, Delete, Shield, Sparkles } from 'lucide-react';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '0', '⌫'];
 
@@ -8,7 +8,6 @@ export default function Dialer({
   error = '',
   onStartCall,
   onEndCall,
-  onBackToVoice,
 }) {
   const [phoneNumber, setPhoneNumber] = useState('1234567891');
   const inCall = status === 'connected';
@@ -27,40 +26,40 @@ export default function Dialer({
   return (
     <div className="flex flex-col h-full text-white justify-between select-none py-1">
       <div>
-        {/* Back to Voice Hub bar */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
-          <button
-            type="button"
-            onClick={onBackToVoice}
-            className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 font-bold"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Voice Assistant</span>
-          </button>
-          <span className="text-[10px] text-slate-400 font-mono">Virtual Keypad</span>
+        {/* Header Branding for Home Dialer */}
+        <div className="border-b border-slate-800 pb-2.5 mb-3 text-center">
+          <div className="inline-flex items-center justify-center gap-1.5 bg-emerald-950/60 border border-emerald-800/40 px-3 py-1 rounded-full text-xs font-bold text-emerald-400 mb-1">
+            <span>🏛️</span>
+            <span>Awaaz Setu Phone Access</span>
+          </div>
+          <p className="text-[11px] text-slate-400 font-medium">
+            Dial <span className="font-mono text-emerald-400 font-bold">1234567891</span> to speak with Karnataka Gov AI
+          </p>
         </div>
 
         {/* Display screen */}
         <div className="mb-4">
-          <p className="text-center text-[11px] mb-1 text-slate-400">
+          <p className="text-center text-[11px] mb-1 text-slate-400 font-medium">
             {connecting
-              ? 'Connecting telephony line...'
+              ? 'Connecting to Awaaz Setu...'
               : inCall
-              ? 'Call connected'
+              ? 'Call Connected • Forwarding to Voice Engine...'
               : 'Enter Telephone Number:'}
           </p>
-          <input
-            type="tel"
-            value={phoneNumber}
-            onChange={(e) => {
-              const val = e.target.value;
-              if (/^[+0-9\s\-()]*$/.test(val)) setPhoneNumber(val);
-            }}
-            disabled={inCall || connecting}
-            placeholder="+91..."
-            aria-label="Caller Phone Number"
-            className="w-full bg-slate-900 p-3 rounded-2xl text-center text-2xl font-mono tracking-widest min-h-[52px] border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-inner"
-          />
+          <div className="relative">
+            <input
+              type="tel"
+              value={phoneNumber}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (/^[+0-9\s\-()]*$/.test(val)) setPhoneNumber(val);
+              }}
+              disabled={inCall || connecting}
+              placeholder="+91..."
+              aria-label="Caller Phone Number"
+              className="w-full bg-slate-900 p-3 rounded-2xl text-center text-2xl font-mono tracking-widest min-h-[56px] border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-inner font-bold"
+            />
+          </div>
         </div>
 
         {/* Numeric keypad */}
@@ -70,7 +69,7 @@ export default function Dialer({
               key={key}
               onClick={() => handleKeyPress(key)}
               disabled={inCall || connecting}
-              className="h-12 bg-slate-900/90 hover:bg-slate-800 active:bg-slate-700 rounded-2xl font-bold text-lg transition-all shadow border border-slate-800/80 disabled:opacity-40"
+              className="h-13 bg-slate-900/90 hover:bg-slate-800 active:bg-slate-700 rounded-2xl font-bold text-xl transition-all shadow-md border border-slate-800/80 active:scale-95 disabled:opacity-40"
             >
               {key}
             </button>
@@ -81,40 +80,43 @@ export default function Dialer({
       {/* Call button actions */}
       <div>
         <div className="flex gap-2">
-          {!inCall && (
-            <button
-              onClick={() => setPhoneNumber('')}
-              disabled={connecting}
-              className="w-1/3 py-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-xs font-semibold disabled:opacity-50"
-            >
-              Clear
-            </button>
-          )}
+          <button
+            onClick={() => setPhoneNumber('')}
+            disabled={connecting || inCall}
+            className="w-1/3 py-3.5 bg-slate-800 hover:bg-slate-700 rounded-2xl text-xs font-semibold disabled:opacity-50 transition-all border border-slate-700"
+          >
+            Clear
+          </button>
 
-          {inCall || connecting ? (
+          {connecting ? (
             <button
               onClick={onEndCall}
-              className="w-full py-3 bg-rose-600 hover:bg-rose-500 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-rose-900/30 text-sm"
+              className="w-2/3 py-3.5 bg-rose-600 hover:bg-rose-500 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-rose-900/30 text-sm transition-all"
             >
-              {connecting ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <PhoneOff className="w-5 h-5" />
-              )}
-              {connecting ? 'Cancel Call' : 'End Call'}
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span>Connecting...</span>
+            </button>
+          ) : inCall ? (
+            <button
+              onClick={onEndCall}
+              className="w-2/3 py-3.5 bg-rose-600 hover:bg-rose-500 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-rose-900/30 text-sm transition-all"
+            >
+              <PhoneOff className="w-5 h-5" />
+              <span>End Call</span>
             </button>
           ) : (
             <button
               onClick={() => onStartCall(phoneNumber)}
-              className="w-2/3 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/40 text-sm"
+              className="w-2/3 py-3.5 bg-emerald-600 hover:bg-emerald-500 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/40 text-base transition-all active:scale-95"
             >
-              <Phone className="w-5 h-5" /> Call Agent
+              <Phone className="w-5 h-5 fill-current" />
+              <span>Call Agent</span>
             </button>
           )}
         </div>
 
         {error && (
-          <p className="mt-2 text-xs text-rose-400 text-center font-medium bg-rose-950/40 py-1 rounded-xl">
+          <p className="mt-2 text-xs text-rose-400 text-center font-medium bg-rose-950/40 py-1.5 px-2 rounded-xl border border-rose-800/40">
             {error}
           </p>
         )}

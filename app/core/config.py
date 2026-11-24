@@ -89,7 +89,7 @@ class Settings(BaseSettings):
         description="Google Gemini API key for free-tier natural language generation.",
     )
     GEMINI_MODEL: str = Field(
-        default="gemini-1.5-flash",
+        default="gemini-3.5-flash-lite",
         description="Gemini model identifier (e.g., 'gemini-1.5-flash' or 'gemini-2.0-flash').",
     )
 

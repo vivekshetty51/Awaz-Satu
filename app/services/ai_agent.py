@@ -152,14 +152,15 @@ async def query_gemini_llm(
     if not key:
         return None
 
-    model = (model_name or os.getenv("GEMINI_MODEL", "gemini-1.5-flash")).strip()
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-    masked_phone = mask_phone_number(phone)
+    primary_model = (model_name or os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")).strip()
+    candidate_models = [primary_model]
+    for alt in ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"]:
+        if alt not in candidate_models:
+            candidate_models.append(alt)
 
-    # Retrieve prior turns from caller's isolated session
+    masked_phone = mask_phone_number(phone)
     history = caller_sessions.get_history(phone)
 
-    # Format Gemini contents array: roles must alternate between "user" and "model"
     contents: List[Dict[str, Any]] = []
     for turn in history:
         gemini_role = "user" if turn["role"] == "user" else "model"
@@ -168,11 +169,9 @@ async def query_gemini_llm(
             "parts": [{"text": turn["text"]}],
         })
 
-    # Ensure alternating roles and starting with "user" if history had orphan turns
     if contents and contents[0]["role"] != "user":
         contents = contents[1:]
 
-    # Append current turn as user query
     contents.append({
         "role": "user",
         "parts": [{"text": text_query}],
@@ -189,65 +188,55 @@ async def query_gemini_llm(
         },
     }
 
-    try:
-        client_timeout = httpx.Timeout(timeout_seconds, connect=2.0)
-        async with httpx.AsyncClient(timeout=client_timeout) as client:
-            response = await client.post(
-                url,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                candidates = data.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts and "text" in parts[0]:
-                        raw_reply = parts[0]["text"]
-                        reply = clean_voice_text(raw_reply)
-                        if reply:
-                            # Update caller session history with both caller turn and assistant response
-                            caller_sessions.add_turn(phone, "user", text_query)
-                            caller_sessions.add_turn(phone, "model", reply)
-                            logger.info(
-                                "Gemini LLM response generated successfully",
-                                extra={"phone": masked_phone, "chars": len(reply), "model": model},
-                            )
-                            return reply
-
-                logger.warning(
-                    "Gemini API returned 200 OK but candidates/parts text was missing",
-                    extra={"phone": masked_phone, "response_snippet": str(data)[:200]},
+    client_timeout = httpx.Timeout(timeout_seconds, connect=3.0)
+    for model in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+        try:
+            async with httpx.AsyncClient(timeout=client_timeout) as client:
+                response = await client.post(
+                    url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
                 )
-                return None
 
-            elif response.status_code == 429:
-                logger.warning(
-                    "Gemini API free-tier quota/rate limit reached (HTTP 429). Activating offline fallback.",
-                    extra={"phone": masked_phone, "model": model},
-                )
-                return None
+                if response.status_code == 200:
+                    data = response.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts and "text" in parts[0]:
+                            raw_reply = parts[0]["text"]
+                            reply = clean_voice_text(raw_reply)
+                            if reply:
+                                caller_sessions.add_turn(phone, "user", text_query)
+                                caller_sessions.add_turn(phone, "model", reply)
+                                logger.info(
+                                    "Gemini LLM response generated successfully",
+                                    extra={"phone": masked_phone, "chars": len(reply), "model": model},
+                                )
+                                return reply
 
-            else:
-                logger.warning(
-                    f"Gemini API returned HTTP {response.status_code}: {response.text[:200]}",
-                    extra={"phone": masked_phone, "status_code": response.status_code},
-                )
-                return None
+                elif response.status_code in (404, 503, 429):
+                    logger.warning(
+                        "Gemini model '%s' returned HTTP %d, attempting fallback model...",
+                        model,
+                        response.status_code,
+                    )
+                    continue
+                else:
+                    logger.warning(
+                        "Gemini API returned HTTP %d: %s",
+                        response.status_code,
+                        response.text[:200],
+                    )
+        except httpx.TimeoutException:
+            logger.warning("Gemini model '%s' timed out, trying fallback...", model)
+            continue
+        except Exception as exc:
+            logger.warning("Gemini model '%s' communication error: %s", model, exc)
+            continue
 
-    except httpx.TimeoutException:
-        logger.warning(
-            f"Gemini API request timed out (>{timeout_seconds}s). Activating offline fallback.",
-            extra={"phone": masked_phone},
-        )
-        return None
-    except Exception as exc:
-        logger.warning(
-            f"Gemini API communication error: {exc}. Activating offline fallback.",
-            extra={"phone": masked_phone},
-        )
-        return None
+    return None
 
 
 async def _query_legacy_http_backend(
@@ -421,7 +410,7 @@ async def query_ai_agent_with_routing(
     llm_provider = (os.getenv("LLM_PROVIDER", "gemini")).strip().lower()
 
     if gemini_key and llm_provider != "offline":
-        model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+        model_name = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
         gemini_response = await query_gemini_llm(
             text_query=text_query,
             phone=phone,
@@ -447,6 +436,16 @@ async def query_ai_agent_with_routing(
 
     # Final Offline conversational / domain fallback
     dpi_service, dpi_details, domain_fallback = classify_intent(text_query)
+    q_lower = text_query.lower()
+    agri_words = ["mandi", "bhav", "gehu", "wheat", "tamatar", "tomato", "pyaz", "onion", "pm kisan", "kisan", "crop", "fasal"]
+    if not any(w in q_lower for w in agri_words):
+        domain_fallback = (
+            f"Regarding {text_query}, I am the Awaaz Setu voice assistant. "
+            "For general knowledge questions, please ensure network connection to Google Gemini is active, "
+            "or ask any Karnataka Government scheme question like Gruha Lakshmi, Sandhya Suraksha, or Bhoomi."
+        )
+        dpi_service = "Google Gemini Assistant"
+        dpi_details = "Awaaz Setu Intelligent Voice Layer"
     return domain_fallback, dpi_service, dpi_details, "GEMINI", None, confidence
 
 
