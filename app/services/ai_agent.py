@@ -3,11 +3,14 @@ AI Agent Communication Bridge for Awaaz Setu.
 
 Architectural Context:
 - Non-blocking HTTP integration: Uses asynchronous `httpx.AsyncClient` with a strict timeout SLA.
-- Multi-tier conversational AI pipeline:
-  1. Google Gemini Conversational LLM (free tier: gemini-flash-latest alias) with
-     per-caller session history isolation and agricultural voice prompt grounding.
-  2. Legacy / Custom HTTP agent backend (if AI_SERVICE_URL or custom endpoint is specified).
-  3. Offline deterministic domain intent fallback (classify_intent) when offline, timed out, or quota exhausted (429).
+- Multi-tier conversational AI pipeline powered by a formal Decision Tree:
+  1. Decision Tree Routing:
+     - Karnataka Government schemes, citizen portals, land records, welfare -> Routed to Karnataka RAG Engine.
+     - General / Out of range / Open domain questions -> Routed to Google Gemini Conversational LLM.
+  2. Grounded Karnataka Government RAG (KarnatakaRAGEngine) with official citations (sevasindhu, bhoomi, bescom, etc.).
+  3. Google Gemini Conversational LLM (gemini-1.5-flash / gemini-2.0-flash) with per-caller session history isolation.
+  4. Legacy / Custom HTTP agent backend (if AI_SERVICE_URL or custom endpoint is specified).
+  5. Offline deterministic domain intent fallback (classify_intent) when offline, timed out, or quota exhausted (429).
 - Privacy & PII protection: Caller phone numbers are strictly masked before logging.
 - Caller session isolation: Caller A's multi-turn conversation memory cannot bleed into Caller B.
 - Zero-cost: Free-tier API integration with zero paid service dependency.
@@ -17,13 +20,14 @@ from collections import defaultdict
 import os
 import re
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from app.core.logger import get_logger
-from app.core.language import english_only
-from app.services.intent_router import PM_KISAN_SPOKEN, classify_intent
-from app.services.knowledge_router import answer_from_knowledge
+from app.decision_tree.decision_tree_engine import DecisionTreeRouter
+from app.decision_tree.tree_nodes import DecisionTrace, RoutingTarget
+from app.rag.rag_engine import karnataka_rag_engine, RAGResponse
+from app.services.intent_router import classify_intent
 
 logger = get_logger("awaaz_setu.services.ai_agent")
 
@@ -38,37 +42,22 @@ DEFAULT_AI_AGENT_URL: str = os.getenv(
     "http://localhost:8003/api/chat",
 )
 
-def build_voice_system_prompt() -> str:
-    """Voice prompt for Gemini. The language rule follows the ENGLISH_ONLY policy."""
-    if english_only():
-        language_rule = (
-            "3. Always respond in clear, simple English only, even if the caller mixes in words "
-            "from another language.\n"
-        )
-    else:
-        language_rule = (
-            "3. Always respond in the SAME language or dialect the user asked in (Kannada, Hindi, "
-            "English, Hinglish, or Kanglish).\n"
-        )
-    return (
-        "You are Awaaz Setu, an empathetic, concise, and knowledgeable voice-based AI assistant for "
-        "citizens of Karnataka and rural India: farmers, livestock keepers, and anyone seeking "
-        "government scheme information such as pensions, scholarships and welfare.\n"
-        "Mandatory Voice Guidelines:\n"
-        "1. Keep responses short and speakable: 1 to 3 short sentences maximum.\n"
-        "2. Never use markdown formatting, bullet points, asterisks (*), numbered lists, emojis, or URLs, "
-        "as they cannot be spoken naturally by text-to-speech engines.\n"
-        + language_rule +
-        "4. Ground all answers in practical knowledge of government schemes, agriculture, crop health, "
-        "weather advisory, and livestock care.\n"
-        "5. Strict anti-hallucination constraint: Never fabricate live APMC/mandi commodity prices, "
-        "scheme amounts, eligibility rules or unverified disbursement dates. If asked for real-time "
-        "prices or exact scheme details you are unsure about, say the caller should confirm at the "
-        "nearest Gram Panchayat, Seva Sindhu centre or the official portal."
-    )
+VOICE_SYSTEM_PROMPT: str = (
+    "You are Awaaz Setu, an empathetic, concise, and knowledgeable voice-based AI assistant for "
+    "citizens, farmers, rural communities, and students in India.\n"
+    "Mandatory Voice Guidelines:\n"
+    "1. Keep responses short and speakable: 1 to 3 short sentences maximum.\n"
+    "2. Never use markdown formatting, bullet points, asterisks (*), numbered lists, emojis, or URLs, "
+    "as they cannot be spoken naturally by text-to-speech engines.\n"
+    "3. Respond clearly in English.\n"
+    "4. Ground state welfare, land, and citizen scheme inquiries in official Karnataka Government portals.\n"
+    "5. Strict anti-hallucination constraint: Never fabricate live APMC/mandi commodity prices or unverified "
+    "scheme disbursement dates. If asked for real-time mandi prices or dates, state that they should consult "
+    "their local APMC market or official portal."
+)
 
-
-VOICE_SYSTEM_PROMPT: str = build_voice_system_prompt()
+# Global singleton decision tree router
+decision_tree_router = DecisionTreeRouter()
 
 
 def mask_phone_number(phone: str) -> str:
@@ -161,14 +150,15 @@ async def query_gemini_llm(
     if not key:
         return None
 
-    model = (model_name or os.getenv("GEMINI_MODEL", "gemini-flash-latest")).strip()
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-    masked_phone = mask_phone_number(phone)
+    primary_model = (model_name or os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")).strip()
+    candidate_models = [primary_model]
+    for alt in ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"]:
+        if alt not in candidate_models:
+            candidate_models.append(alt)
 
-    # Retrieve prior turns from caller's isolated session
+    masked_phone = mask_phone_number(phone)
     history = caller_sessions.get_history(phone)
 
-    # Format Gemini contents array: roles must alternate between "user" and "model"
     contents: List[Dict[str, Any]] = []
     for turn in history:
         gemini_role = "user" if turn["role"] == "user" else "model"
@@ -177,11 +167,9 @@ async def query_gemini_llm(
             "parts": [{"text": turn["text"]}],
         })
 
-    # Ensure alternating roles and starting with "user" if history had orphan turns
     if contents and contents[0]["role"] != "user":
         contents = contents[1:]
 
-    # Append current turn as user query
     contents.append({
         "role": "user",
         "parts": [{"text": text_query}],
@@ -198,65 +186,55 @@ async def query_gemini_llm(
         },
     }
 
-    try:
-        client_timeout = httpx.Timeout(timeout_seconds, connect=2.0)
-        async with httpx.AsyncClient(timeout=client_timeout) as client:
-            response = await client.post(
-                url,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                candidates = data.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts and "text" in parts[0]:
-                        raw_reply = parts[0]["text"]
-                        reply = clean_voice_text(raw_reply)
-                        if reply:
-                            # Update caller session history with both caller turn and assistant response
-                            caller_sessions.add_turn(phone, "user", text_query)
-                            caller_sessions.add_turn(phone, "model", reply)
-                            logger.info(
-                                "Gemini LLM response generated successfully",
-                                extra={"phone": masked_phone, "chars": len(reply), "model": model},
-                            )
-                            return reply
-
-                logger.warning(
-                    "Gemini API returned 200 OK but candidates/parts text was missing",
-                    extra={"phone": masked_phone, "response_snippet": str(data)[:200]},
+    client_timeout = httpx.Timeout(timeout_seconds, connect=3.0)
+    for model in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+        try:
+            async with httpx.AsyncClient(timeout=client_timeout) as client:
+                response = await client.post(
+                    url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
                 )
-                return None
 
-            elif response.status_code == 429:
-                logger.warning(
-                    "Gemini API free-tier quota/rate limit reached (HTTP 429). Activating offline fallback.",
-                    extra={"phone": masked_phone, "model": model},
-                )
-                return None
+                if response.status_code == 200:
+                    data = response.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts and "text" in parts[0]:
+                            raw_reply = parts[0]["text"]
+                            reply = clean_voice_text(raw_reply)
+                            if reply:
+                                caller_sessions.add_turn(phone, "user", text_query)
+                                caller_sessions.add_turn(phone, "model", reply)
+                                logger.info(
+                                    "Gemini LLM response generated successfully",
+                                    extra={"phone": masked_phone, "chars": len(reply), "model": model},
+                                )
+                                return reply
 
-            else:
-                logger.warning(
-                    f"Gemini API returned HTTP {response.status_code}: {response.text[:200]}",
-                    extra={"phone": masked_phone, "status_code": response.status_code},
-                )
-                return None
+                elif response.status_code in (404, 503, 429):
+                    logger.warning(
+                        "Gemini model '%s' returned HTTP %d, attempting fallback model...",
+                        model,
+                        response.status_code,
+                    )
+                    continue
+                else:
+                    logger.warning(
+                        "Gemini API returned HTTP %d: %s",
+                        response.status_code,
+                        response.text[:200],
+                    )
+        except httpx.TimeoutException:
+            logger.warning("Gemini model '%s' timed out, trying fallback...", model)
+            continue
+        except Exception as exc:
+            logger.warning("Gemini model '%s' communication error: %s", model, exc)
+            continue
 
-    except httpx.TimeoutException:
-        logger.warning(
-            f"Gemini API request timed out (>{timeout_seconds}s). Activating offline fallback.",
-            extra={"phone": masked_phone},
-        )
-        return None
-    except Exception as exc:
-        logger.warning(
-            f"Gemini API communication error: {exc}. Activating offline fallback.",
-            extra={"phone": masked_phone},
-        )
-        return None
+    return None
 
 
 async def _query_legacy_http_backend(
@@ -264,10 +242,7 @@ async def _query_legacy_http_backend(
     phone: str,
     backend_url: str,
 ) -> str:
-    """
-    Dispatches request to a remote conversational HTTP AI backend (e.g. mock server or external endpoint).
-    Falls back to classify_intent on failure.
-    """
+    """Dispatches request to custom HTTP agent endpoint with timeout fallback."""
     masked_phone = mask_phone_number(phone)
     request_payload: Dict[str, Any] = {
         "phone_number": phone,
@@ -279,7 +254,7 @@ async def _query_legacy_http_backend(
     try:
         async with httpx.AsyncClient(timeout=client_timeout) as client:
             logger.debug(
-                "Dispatching request to legacy AI Agent backend",
+                "Dispatching request to AI Agent backend",
                 extra={
                     "backend_url": backend_url,
                     "phone": masked_phone,
@@ -366,39 +341,74 @@ async def _query_legacy_http_backend(
     return domain_fallback
 
 
-async def query_ai_agent(
+async def query_ai_agent_with_routing(
     text_query: str,
     phone: str,
     backend_url: Optional[str] = None,
-    meta: Optional[Dict[str, Any]] = None,
-) -> str:
+) -> Tuple[str, Optional[str], Optional[str], str, Optional[str], float]:
     """
-    Dispatches a transcribed user query and phone number to conversational AI.
-    1. If a custom backend_url is provided (e.g. in test or custom deployment),
-       dispatches to that downstream HTTP service.
-    2. If Gemini API is configured (GEMINI_API_KEY present and LLM_PROVIDER != 'offline'),
-       queries Google Gemini API with isolated per-caller conversation history.
-    3. Falls back smoothly to domain intent classification on quota errors (429), timeouts,
-       or offline connectivity, never failing the voice turn.
+    Core conversational orchestrator with formal Decision Tree routing:
+    1. If a custom backend_url is passed, routes to legacy HTTP test server.
+    2. Evaluates the query using the Decision Tree:
+       - RAG (Karnataka Gov domain): Queries Karnataka RAG engine, returns official grounded response + source URL.
+       - GEMINI (General / External): Dispatches to Google Gemini LLM API (with conversational fallback).
+    3. Guarantees 100% fault-tolerance and never crashes the voice call.
+
+    Returns:
+        (spoken_text, dpi_service, dpi_details, decision_route, source_url, confidence)
     """
-    # Priority 1: Explicit custom backend_url provided (e.g. in test)
+    # Priority 1: Explicit custom backend_url provided (e.g. in test or custom deployment)
     if backend_url:
-        return await _query_legacy_http_backend(text_query, phone, backend_url)
+        legacy_ans = await _query_legacy_http_backend(text_query, phone, backend_url)
+        dpi_service, dpi_details, _ = classify_intent(text_query)
+        return legacy_ans, dpi_service, dpi_details, "CUSTOM_BACKEND", None, 1.0
 
-    # Priority 2: Karnataka knowledge layer (decision tree -> RAG over official sources).
-    # Returns None when the question is out of scope, so we fall through to Gemini.
-    knowledge = await answer_from_knowledge(text_query, phone)
-    if knowledge is not None:
-        if meta is not None:
-            meta.update(route=knowledge.route, sources=knowledge.sources)
-        return knowledge.text
+    # Priority 2: Decision Tree Evaluation
+    decision_trace: DecisionTrace = decision_tree_router.evaluate(text_query)
+    target = decision_trace.target
+    confidence = decision_trace.confidence
 
-    # Priority 3: Google Gemini Conversational LLM (general questions)
+    # -------------------------------------------------------------------------
+    # Branch A: Karnataka Government Domain -> Route to Karnataka RAG
+    # -------------------------------------------------------------------------
+    if target == RoutingTarget.RAG:
+        logger.info(
+            "Decision Tree routed query to Karnataka RAG (category='%s', rules=%s)",
+            decision_trace.category,
+            decision_trace.matched_rules,
+        )
+        rag_res: Optional[RAGResponse] = await karnataka_rag_engine.answer(
+            query=text_query,
+            phone=phone,
+        )
+
+        if rag_res:
+            # Update caller session memory
+            caller_sessions.add_turn(phone, "user", text_query)
+            caller_sessions.add_turn(phone, "model", rag_res.spoken_text)
+
+            return (
+                rag_res.spoken_text,
+                rag_res.dpi_service,
+                rag_res.dpi_details,
+                "RAG",
+                rag_res.official_url,
+                confidence,
+            )
+
+        # Fallback if RAG retrieval score was low: route gracefully to Gemini
+        logger.info("Karnataka RAG returned no high-confidence document; escalating to Gemini.")
+
+    # -------------------------------------------------------------------------
+    # Branch B: General / Out-of-Range -> Route to Google Gemini
+    # -------------------------------------------------------------------------
+    logger.info("Decision Tree routed query to Google Gemini (confidence=%.2f)", confidence)
+
     gemini_key = (os.getenv("GEMINI_API_KEY", "")).strip()
     llm_provider = (os.getenv("LLM_PROVIDER", "gemini")).strip().lower()
 
     if gemini_key and llm_provider != "offline":
-        model_name = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+        model_name = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
         gemini_response = await query_gemini_llm(
             text_query=text_query,
             phone=phone,
@@ -406,15 +416,49 @@ async def query_ai_agent(
             model_name=model_name,
         )
         if gemini_response:
-            if meta is not None:
-                meta.update(route="gemini", sources=[])
-            return gemini_response
+            return (
+                gemini_response,
+                "Google Gemini Assistant",
+                "Answered via Google Gemini Conversational Intelligence (General Domain)",
+                "GEMINI",
+                None,
+                confidence,
+            )
 
-    # Priority 4: Legacy AI_SERVICE_URL if explicitly configured in environment
+    # Legacy AI_SERVICE_URL if explicitly configured in environment
     env_service_url = os.getenv("AI_SERVICE_URL", "").strip()
     if env_service_url:
-        return await _query_legacy_http_backend(text_query, phone, env_service_url)
+        legacy_ans = await _query_legacy_http_backend(text_query, phone, env_service_url)
+        dpi_service, dpi_details, _ = classify_intent(text_query)
+        return legacy_ans, dpi_service, dpi_details, "GEMINI", None, confidence
 
-    # Priority 5: Offline domain intent fallback
-    _, _, domain_fallback = classify_intent(text_query)
-    return domain_fallback
+    # Final Offline conversational / domain fallback
+    dpi_service, dpi_details, domain_fallback = classify_intent(text_query)
+    q_lower = text_query.lower()
+    agri_words = ["mandi", "bhav", "gehu", "wheat", "tamatar", "tomato", "pyaz", "onion", "pm kisan", "kisan", "crop", "fasal"]
+    if not any(w in q_lower for w in agri_words):
+        domain_fallback = (
+            f"Regarding {text_query}, I am the Awaaz Setu voice assistant. "
+            "For general knowledge questions, please ensure network connection to Google Gemini is active, "
+            "or ask any Karnataka Government scheme question like Gruha Lakshmi, Sandhya Suraksha, or Bhoomi."
+        )
+        dpi_service = "Google Gemini Assistant"
+        dpi_details = "Awaaz Setu Intelligent Voice Layer"
+    return domain_fallback, dpi_service, dpi_details, "GEMINI", None, confidence
+
+
+async def query_ai_agent(
+    text_query: str,
+    phone: str,
+    backend_url: Optional[str] = None,
+) -> str:
+    """
+    Backward-compatible wrapper for query_ai_agent returning the spoken response string.
+    Internally executes the Decision Tree (RAG vs Gemini).
+    """
+    spoken_text, _, _, _, _, _ = await query_ai_agent_with_routing(
+        text_query=text_query,
+        phone=phone,
+        backend_url=backend_url,
+    )
+    return spoken_text

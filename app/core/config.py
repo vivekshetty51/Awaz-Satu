@@ -101,8 +101,8 @@ class Settings(BaseSettings):
         description="Google Gemini API key for free-tier natural language generation.",
     )
     GEMINI_MODEL: str = Field(
-        default="gemini-flash-latest",
-        description="Gemini model identifier. Use the 'gemini-flash-latest' alias or an exact ID from ai.google.dev/gemini-api/docs/models.",
+        default="gemini-3.5-flash-lite",
+        description="Gemini model identifier (e.g., 'gemini-1.5-flash' or 'gemini-2.0-flash').",
     )
 
     # Pydantic Settings Configuration

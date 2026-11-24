@@ -1,11 +1,24 @@
 """
-Retrieval over official Karnataka Government sources.
-
-Public API:
-    get_kb_service()   -> verified, offline answers (no LLM)           [first choice]
-    get_rag_service()  -> generative RAG over crawled/local documents  [second choice]
+Karnataka Government RAG (Retrieval-Augmented Generation) package.
 """
-from app.rag.kb import KbAnswer, KbService, get_kb_service
-from app.rag.retriever import RagAnswer, RagService, get_rag_service
 
-__all__ = ["KbAnswer", "KbService", "RagAnswer", "RagService", "get_kb_service", "get_rag_service"]
+from app.rag.karnataka_knowledge import (
+    KarnatakaSchemeDocument,
+    KARNATAKA_GOVERNMENT_DOCUMENTS,
+    get_all_karnataka_documents,
+    get_document_by_id,
+)
+from app.rag.retriever import KarnatakaRAGRetriever, RetrievalResult
+from app.rag.rag_engine import KarnatakaRAGEngine, RAGResponse, karnataka_rag_engine
+
+__all__ = [
+    "KarnatakaSchemeDocument",
+    "KARNATAKA_GOVERNMENT_DOCUMENTS",
+    "get_all_karnataka_documents",
+    "get_document_by_id",
+    "KarnatakaRAGRetriever",
+    "RetrievalResult",
+    "KarnatakaRAGEngine",
+    "RAGResponse",
+    "karnataka_rag_engine",
+]

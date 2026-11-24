@@ -66,12 +66,15 @@ def is_caller_number_allowed(phone: str) -> bool:
     Authoritative server-side caller number validation.
     Checks normalized entered number against ALLOWED_CALLER_NUMBER environment variable.
     Requires strict exact equality; rejects partial or substring matches.
+    If ALLOWED_CALLER_NUMBER is '*', permits any valid non-empty telephone number.
     If ALLOWED_CALLER_NUMBER is empty or not set, rejects all incoming numbers.
     """
     allowed = os.getenv("ALLOWED_CALLER_NUMBER", "").strip()
     if not allowed:
         return False
     norm_phone = normalize_phone(phone)
+    if allowed == "*":
+        return bool(norm_phone)
     norm_allowed = normalize_phone(allowed)
     if not norm_phone or not norm_allowed:
         return False
@@ -212,4 +215,18 @@ def get_token(
         token_builder = token_builder.with_metadata(metadata_payload)
 
     token = token_builder.to_jwt()
-    return {"token": token, "url": livekit_url, "room": room}
+    is_livekit_ready = bool(
+        api_key
+        and not api_key.startswith("your_")
+        and livekit_url
+        and not "your-project" in livekit_url
+        and api_secret
+        and not api_secret.startswith("your_")
+    )
+    return {
+        "token": token,
+        "url": livekit_url,
+        "room": room,
+        "livekit_ready": is_livekit_ready,
+        "mode": "livekit_webrtc" if is_livekit_ready else "direct_voice",
+    }

@@ -21,7 +21,13 @@ import base64
 import io
 import json
 import os
+import sys
+from pathlib import Path
 import unittest
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np

@@ -122,8 +122,10 @@ async def send_dpi_result(
     details: str,
     query: str = "",
     response: str = "",
+    route: str = "",
+    source_url: str = "",
 ) -> None:
-    """Send DPI results to the frontend over LiveKit data channel."""
+    """Send DPI results and decision routing metadata to the frontend over LiveKit data channel."""
     payload_dict = {
         "service": service,
         "details": details,
@@ -132,6 +134,10 @@ async def send_dpi_result(
         payload_dict["query"] = query
     if response:
         payload_dict["response"] = response
+    if route:
+        payload_dict["route"] = route
+    if source_url:
+        payload_dict["source_url"] = source_url
 
     payload = json.dumps(payload_dict).encode("utf-8")
 
@@ -141,7 +147,7 @@ async def send_dpi_result(
         topic=DPI_TOPIC,
     )
 
-    logger.info("Sent DPI result to UI: %s", service)
+    logger.info("Sent DPI result to UI: %s (route=%s)", service, route or "N/A")
 
 
 # --------------------------------------------------
@@ -303,6 +309,8 @@ async def process_caller_audio(
         ai_response = result.get("ai_text_response", "")
         dpi_service = result.get("dpi_service")
         dpi_details = result.get("dpi_details")
+        decision_route = result.get("decision_route") or ""
+        source_url = result.get("source_url") or ""
 
         logger.info(
             "Recognized caller speech (chars=%d) for user %s: '%s'",
@@ -317,7 +325,7 @@ async def process_caller_audio(
             ai_response,
         )
 
-        # Dispatch DPI result to UI only if an agricultural service intent was identified
+        # Dispatch DPI result to UI
         if dpi_service and dpi_details:
             await send_dpi_result(
                 room=room,
@@ -325,6 +333,8 @@ async def process_caller_audio(
                 details=dpi_details,
                 query=recognized_text,
                 response=ai_response,
+                route=decision_route,
+                source_url=source_url,
             )
 
         output_audio = result.get("output_audio_base64", "")
